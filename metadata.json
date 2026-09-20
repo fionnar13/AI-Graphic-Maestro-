@@ -1,0 +1,6 @@
+{
+  "name": "AI Graphic Maestro",
+  "description": "Technical audit and autonomous graphic design pipeline architecture for AI Graphic Maestro.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
