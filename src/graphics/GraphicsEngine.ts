@@ -869,7 +869,10 @@ export class GraphicsEngine {
       // (translate/rotate/scale) correctly. The transform is already set
       // on ctx from the layer rendering above, so drawImage at (0, 0, w, h)
       // in the layer's local coordinate space applies the transform.
-      const pixelBuffer = this.getLayerPixelBuffer(layer.id);
+      // Phase 14.3.3 (A2) — Use direct map access instead of getLayerPixelBuffer()
+      // to avoid auto-creating opaque gray buffers for layers without pixel data.
+      // The renderer must be observational: blit existing buffers, skip missing ones.
+      const pixelBuffer = this.layerPixelBuffers.get(layer.id);
       if (pixelBuffer && typeof document !== 'undefined' && typeof document.createElement === 'function') {
         const offscreen = document.createElement('canvas');
         offscreen.width = pixelBuffer.width;
