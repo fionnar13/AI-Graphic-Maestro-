@@ -159,18 +159,20 @@ async function runGraphicsTestSuite() {
   });
 
   await test('Tool 4: ScaleTool (Uniform and non-uniform scaling)', async () => {
+    // Phase 14.3.3 (A4) — ScaleTool now writes only bounds.width/height (not transform.scale)
     const startW = testLayer.bounds.width;
     await engine.executeTool('tool.scale', {
       layerId: testLayer.id,
       scaleX: 1.5,
       scaleY: 1.5,
     });
-    assert(testLayer.transform.scale.x === 1.5, 'Scale X updated to 1.5');
     assert(testLayer.bounds.width === Math.round(startW * 1.5), 'Bounds width scaled');
+    assert(testLayer.transform.scale.x === 1, 'transform.scale stays at identity (A4)');
+    assert(testLayer.transform.scale.y === 1, 'transform.scale stays at identity (A4)');
 
     await engine.rollback();
-    assert(testLayer.transform.scale.x === 1.0, 'Scale rollback restored 1.0');
     assert(testLayer.bounds.width === startW, 'Bounds rollback restored width');
+    assert(testLayer.transform.scale.x === 1, 'transform.scale still identity after rollback');
   });
 
   await test('Tool 5: RotateTool (Angle rotation with 360 wrap)', async () => {
