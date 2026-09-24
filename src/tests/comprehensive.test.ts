@@ -617,6 +617,65 @@ export class ComprehensiveTestSuite {
       if (buf) throw new Error('renderDocument auto-created a pixel buffer — renderer must be observational');
     }));
 
+    // CropTool hotfix — canvas-crop does not write transform.position
+    results.push(await this.runTest('regression', 'Regression: Canvas crop does not write transform.position (CropTool hotfix)', () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'CropTest', type: 'raster',
+        bounds: { x: 100, y: 100, width: 200, height: 150 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      const startBoundsX = layer.bounds.x;
+      const startBoundsY = layer.bounds.y;
+
+      graphics.executeTool('tool.crop', {
+        target: 'canvas', layerId: layer.id,
+        x: 50, y: 50, width: 400, height: 300,
+      });
+
+      // bounds should shift by exactly -50, -50 (single apply)
+      if (layer.bounds.x !== startBoundsX - 50) throw new Error(`Expected bounds.x=${startBoundsX - 50}, got ${layer.bounds.x}`);
+      if (layer.bounds.y !== startBoundsY - 50) throw new Error(`Expected bounds.y=${startBoundsY - 50}, got ${layer.bounds.y}`);
+      // transform.position must remain at identity
+      if (layer.transform.position.x !== 0) throw new Error(`transform.position.x should be 0, got ${layer.transform.position.x}`);
+      if (layer.transform.position.y !== 0) throw new Error(`transform.position.y should be 0, got ${layer.transform.position.y}`);
+    }));
+
+    // CropTool hotfix — undo/redo preserves single-apply
+    results.push(await this.runTest('regression', 'Regression: Crop undo/redo preserves transform.position identity (CropTool hotfix)', async () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'CropUndoTest', type: 'raster',
+        bounds: { x: 200, y: 150, width: 100, height: 100 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      const origX = layer.bounds.x;
+      const origY = layer.bounds.y;
+
+      // Execute crop
+      await graphics.executePrimitiveToolCommand('tool.crop', {
+        target: 'canvas', layerId: layer.id,
+        x: 50, y: 50, width: 500, height: 400,
+      });
+      if (layer.transform.position.x !== 0) throw new Error(`transform.position.x should be 0 after crop, got ${layer.transform.position.x}`);
+
+      // Undo
+      await history.undo();
+      if (layer.bounds.x !== origX) throw new Error(`Undo should restore bounds.x=${origX}, got ${layer.bounds.x}`);
+      if (layer.transform.position.x !== 0) throw new Error(`transform.position.x should be 0 after undo, got ${layer.transform.position.x}`);
+
+      // Redo
+      await history.redo();
+      if (layer.bounds.x !== origX - 50) throw new Error(`Redo should restore bounds.x=${origX - 50}, got ${layer.bounds.x}`);
+      if (layer.transform.position.x !== 0) throw new Error(`transform.position.x should be 0 after redo, got ${layer.transform.position.x}`);
+    }));
+
     return results;
   }
 

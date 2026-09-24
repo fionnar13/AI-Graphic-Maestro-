@@ -95,18 +95,14 @@ export class CropTool implements IGraphicsTool {
       const prevCanvasDims = { ...context.document.canvas.dimensions };
       const prevLayerPositions = context.document.layers.map((l) => ({
         id: l.id,
-        position: { ...l.transform.position },
         bounds: { ...l.bounds },
       }));
 
-      // Adjust all layers relative to new origin
+      // Phase 14.3.3 — Adjust all layers relative to new origin.
+      // Only write bounds.x/y, NOT transform.position.
+      // The renderer sums bounds.x + transform.position.x, so writing both
+      // causes a double-offset. Same fix as MoveTool (A3) and ScaleTool (A4).
       for (const l of context.document.layers) {
-        context.documentEngine.setTransform(l.id, {
-          position: {
-            x: l.transform.position.x - cropX,
-            y: l.transform.position.y - cropY,
-          },
-        });
         context.documentEngine.setBounds(l.id, {
           ...l.bounds,
           x: l.bounds.x - cropX,
@@ -142,7 +138,6 @@ export class CropTool implements IGraphicsTool {
         rollbackData.prevCanvasDims.height
       );
       for (const lp of rollbackData.prevLayerPositions) {
-        context.documentEngine.setTransform(lp.id, { position: lp.position });
         context.documentEngine.setBounds(lp.id, lp.bounds);
       }
     }
