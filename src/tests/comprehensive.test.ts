@@ -99,8 +99,10 @@ export class ComprehensiveTestSuite {
 
     results.push(await this.runTest('unit', 'Unit: HistoryEngine Snapshots & State Rollback', () => {
       const doc = new MaestroDocumentEngine();
-      const graphics = new GraphicsEngine(800, 600, doc);
-      const history = new HistoryEngine(doc, graphics);
+      // Phase 14.3.2 (Fix 1+1a) — Two-phase construction
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 600, doc, history);
+      history.setGraphicsEngine(graphics);
       history.saveSnapshot({
         iteration: 0,
         score: 0.85,
@@ -173,7 +175,10 @@ export class ComprehensiveTestSuite {
 
     results.push(await this.runTest('integration', 'Integration: DSL Operations → ToolRegistry Execution → GraphicsEngine Canvas', async () => {
       const doc = new MaestroDocumentEngine();
-      const graphics = new GraphicsEngine(800, 500, doc);
+      // Phase 14.3.2 (Fix 1+1a) — Two-phase construction
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
       const tools = new ToolRegistry();
       const context = {
         graphicsEngine: graphics,
@@ -197,8 +202,10 @@ export class ComprehensiveTestSuite {
     results.push(await this.runTest('integration', 'Integration: VisualCritic ↔ SelfRevisionEngine Feedback & Correction', async () => {
       const engine = new SelfRevisionEngine({ maxIterations: 2 });
       const doc = new MaestroDocumentEngine();
-      const graphics = new GraphicsEngine(800, 500, doc);
-      const history = new HistoryEngine(doc, graphics);
+      // Phase 14.3.2 (Fix 1+1a) — Two-phase construction
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
       const tools = new ToolRegistry();
 
       const res = await engine.runRevisionLoop({
@@ -222,8 +229,10 @@ export class ComprehensiveTestSuite {
       const adapter = new InMemoryStorageAdapter();
       const memory = new MemoryEngine(adapter);
       const doc = new MaestroDocumentEngine();
-      const graphics = new GraphicsEngine(800, 500, doc);
-      const history = new HistoryEngine(doc, graphics);
+      // Phase 14.3.2 (Fix 1+1a) — Two-phase construction
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
 
       const count0 = memory.getTotalMemoryEntries();
       // Add snapshot in history and then rollback
@@ -324,7 +333,10 @@ export class ComprehensiveTestSuite {
 
     results.push(await this.runTest('performance', 'Performance: Real Canvas Multi-Pass Render Loop (10 iterations < 150ms)', () => {
       const doc = new MaestroDocumentEngine();
-      const graphics = new GraphicsEngine(800, 500, doc);
+      // Phase 14.3.2 (Fix 1+1a) — Two-phase construction
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
       const t0 = performance.now();
       for (let i = 0; i < 10; i++) {
         graphics.clear();
@@ -365,8 +377,10 @@ export class ComprehensiveTestSuite {
     results.push(await this.runTest('error_recovery', 'Error Recovery: Automatic Rollback on Visual Degradation', async () => {
       const engine = new SelfRevisionEngine({ maxIterations: 1, minImprovementDelta: 0.1 });
       const doc = new MaestroDocumentEngine();
-      const graphics = new GraphicsEngine(800, 500, doc);
-      const history = new HistoryEngine(doc, graphics);
+      // Phase 14.3.2 (Fix 1+1a) — Two-phase construction
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
       const tools = new ToolRegistry();
 
       const result = await engine.runRevisionLoop({

@@ -95,7 +95,8 @@ export class GraphicsEngine {
   constructor(
     width: number = 800,
     height: number = 500,
-    documentEngine?: MaestroDocumentEngine
+    documentEngine: MaestroDocumentEngine,
+    historyEngine: HistoryEngine
   ) {
     this.width = width;
     this.height = height;
@@ -112,19 +113,20 @@ export class GraphicsEngine {
       this.ctx = null;
     }
 
-    this.documentEngine =
-      documentEngine ||
-      new MaestroDocumentEngine({
-        canvas: {
-          dimensions: { width, height },
-          resolutionDpi: 300,
-          backgroundColor: '#0c0a09',
-          guides: { horizontal: [], vertical: [] },
-        },
-      });
+    // Phase 14.3.2 (Fix 1) — documentEngine is now REQUIRED (no default
+    // construction). The caller (Orchestrator or tests) must inject the
+    // canonical MaestroDocumentEngine instance to ensure a single source
+    // of truth. See docs/PHASE_14.3.2_IMPLEMENTATION_PLAN.md §4 (Fix 1).
+    this.documentEngine = documentEngine;
+
+    // Phase 14.3.2 (Fix 1a) — historyEngine is now REQUIRED (no internal
+    // construction). Two-phase construction (Approach 2.1): HistoryEngine is
+    // constructed first with documentEngine only, then GraphicsEngine is
+    // constructed with both, then Orchestrator calls
+    // historyEngine.setGraphicsEngine(graphicsEngine) to complete wiring.
+    this.historyEngine = historyEngine;
 
     this.workerDispatcher = WorkerDispatcher.getInstance();
-    this.historyEngine = new HistoryEngine(this.documentEngine, this);
     this.registerAllPrimitiveTools();
     this.ensureDefaultLayers();
   }

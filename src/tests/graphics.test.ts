@@ -9,6 +9,7 @@ import { PixelBuffer } from '../graphics/engine/PixelBuffer';
 import { ColorMath } from '../graphics/engine/ColorMath';
 import { InpaintAlgorithms } from '../graphics/engine/InpaintAlgorithms';
 import { MaestroDocumentEngine } from '../document/MaestroDocumentEngine';
+import { HistoryEngine } from '../history/HistoryEngine';
 
 function assert(condition: boolean, message: string) {
   if (!condition) {
@@ -90,7 +91,10 @@ async function runGraphicsTestSuite() {
     bounds: { x: 0, y: 0, width: 800, height: 500 },
   });
 
-  const engine = new GraphicsEngine(800, 500, docEngine);
+  // Phase 14.3.2 (Fix 1+1a) — Two-phase construction:
+  const historyEngine = new HistoryEngine(docEngine);
+  const engine = new GraphicsEngine(800, 500, docEngine, historyEngine);
+  historyEngine.setGraphicsEngine(engine);
   engine.setActiveLayer(testLayer.id);
 
   await test('Tool 1: SelectionTool (Rectangle & Ellipse with rollback)', async () => {

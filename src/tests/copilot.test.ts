@@ -66,8 +66,10 @@ async function runCopilotTests() {
     bounds: { x: 0, y: 0, width: 1000, height: 800 },
   });
 
-  const historyEngine = new HistoryEngine();
-  const graphicsEngine = new GraphicsEngine(1000, 800, docEngine);
+  // Phase 14.3.2 (Fix 1+1a) — Two-phase construction
+  const historyEngine = new HistoryEngine(docEngine);
+  const graphicsEngine = new GraphicsEngine(1000, 800, docEngine, historyEngine);
+  historyEngine.setGraphicsEngine(graphicsEngine);
   graphicsEngine.setActiveLayer(subjectLayer.id);
   const toolRegistry = new ToolRegistry();
   const copilotEngine = new AICopilotEngine(toolRegistry);

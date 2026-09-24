@@ -77,7 +77,23 @@ export class Orchestrator {
     this.documentEngine = new DocumentEngine();
     this.layerEngine = new LayerEngine();
     this.maskEngine = new MaskEngine();
-    this.graphicsEngine = new GraphicsEngine(800, 500);
+
+    // Phase 14.3.2 (Fix 1a) — Two-phase construction (Approach 2.1):
+    // 1. Construct HistoryEngine FIRST with the canonical MaestroDocumentEngine
+    //    instance (no graphicsEngine arg yet).
+    // 2. Construct GraphicsEngine with BOTH documentEngine and historyEngine
+    //    injected — eliminates the 2nd MaestroDocumentEngine instance (Fix 1)
+    //    and the 2nd HistoryEngine instance (Fix 1a).
+    // 3. Wire graphicsEngine back into historyEngine via setGraphicsEngine().
+    this.history = new HistoryEngine(this.documentEngine.realEngine);
+    this.graphicsEngine = new GraphicsEngine(
+      800,
+      500,
+      this.documentEngine.realEngine,
+      this.history
+    );
+    this.history.setGraphicsEngine(this.graphicsEngine);
+
     this.toolRegistry = new ToolRegistry();
     this.dsl = new GraphicDSL();
     this.vision = new VisionEngine();
@@ -85,7 +101,6 @@ export class Orchestrator {
     this.planner = new Planner();
     this.critic = new CriticEngine();
     this.memory = new MemoryEngine();
-    this.history = new HistoryEngine();
   }
 
   /**

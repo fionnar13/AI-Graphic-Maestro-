@@ -232,8 +232,10 @@ export class MemoryTestSuite {
       const adapter = new InMemoryStorageAdapter();
       const memory = new MemoryEngine(adapter);
       const docEngine = new MaestroDocumentEngine();
-      const graphics = new GraphicsEngine(800, 500, docEngine);
-      const history = new HistoryEngine(docEngine, graphics);
+      // Phase 14.3.2 (Fix 1+1a) — Two-phase construction
+      const history = new HistoryEngine(docEngine);
+      const graphics = new GraphicsEngine(800, 500, docEngine, history);
+      history.setGraphicsEngine(graphics);
 
       // 1. Record an initial lesson in Memory
       memory.recordVisualDecision('lighting', 'top_left keylight', 'initial optimal angle');

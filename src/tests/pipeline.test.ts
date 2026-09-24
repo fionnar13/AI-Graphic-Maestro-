@@ -195,8 +195,10 @@ export class MaestroTestSuite {
     results.push(this.runTest('SelfRevisionEngine: Improvement Triggers ACCEPT', () => {
       const engine = new SelfRevisionEngine({ maxIterations: 2 });
       const docEngine = new MaestroDocumentEngine();
-      const graphics = new GraphicsEngine(800, 500, docEngine);
-      const history = new HistoryEngine(docEngine, graphics);
+      // Phase 14.3.2 (Fix 1+1a) — Two-phase construction
+      const history = new HistoryEngine(docEngine);
+      const graphics = new GraphicsEngine(800, 500, docEngine, history);
+      history.setGraphicsEngine(graphics);
       const tools = new ToolRegistry();
 
       const res = engine.runRevisionLoopSync({
@@ -224,8 +226,10 @@ export class MaestroTestSuite {
     results.push(this.runTest('SelfRevisionEngine: Failure Recovery Triggers ROLLBACK', () => {
       const engine = new SelfRevisionEngine({ maxIterations: 2, minImprovementDelta: 0.05 });
       const docEngine = new MaestroDocumentEngine();
-      const graphics = new GraphicsEngine(800, 500, docEngine);
-      const history = new HistoryEngine(docEngine, graphics);
+      // Phase 14.3.2 (Fix 1+1a) — Two-phase construction
+      const history = new HistoryEngine(docEngine);
+      const graphics = new GraphicsEngine(800, 500, docEngine, history);
+      history.setGraphicsEngine(graphics);
       const tools = new ToolRegistry();
 
       const res = engine.runRevisionLoopSync({
@@ -292,8 +296,10 @@ export class MaestroTestSuite {
       const adapter = new InMemoryStorageAdapter();
       const memory = new MemoryEngine(adapter);
       const docEngine = new MaestroDocumentEngine();
-      const graphics = new GraphicsEngine(800, 500, docEngine);
-      const history = new HistoryEngine(docEngine, graphics);
+      // Phase 14.3.2 (Fix 1+1a) — Two-phase construction
+      const history = new HistoryEngine(docEngine);
+      const graphics = new GraphicsEngine(800, 500, docEngine, history);
+      history.setGraphicsEngine(graphics);
 
       const countBefore = memory.getTotalMemoryEntries();
 
