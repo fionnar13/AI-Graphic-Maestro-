@@ -284,7 +284,10 @@ export class Orchestrator {
       iteration: 0,
       score: 0.82,
       status: 'executed',
-      documentSnapshot: this.documentEngine.getDocument(),
+      // Phase 14.3.2 (Fix 6 + 6a) — capture canonical MaestroDocumentModel via
+      // cloneDocument() (deep clone), NOT getDocument() (legacy model, no layers)
+      // and NOT getRealDocument() (returns a reference that mutates with the doc).
+      documentSnapshot: this.documentEngine.realEngine.cloneDocument(),
       operationsExecuted: dslOperations,
       timestamp: Date.now() - 3000,
     };
@@ -497,7 +500,10 @@ export class Orchestrator {
       iteration: 0,
       score: 0.78,
       status: 'executed',
-      documentSnapshot: this.documentEngine.getDocument(),
+      // Phase 14.3.2 (Fix 6 + 6a) — capture canonical MaestroDocumentModel via
+      // cloneDocument() (deep clone), NOT getDocument() (legacy model, no layers)
+      // and NOT getRealDocument() (returns a reference that mutates with the doc).
+      documentSnapshot: this.documentEngine.realEngine.cloneDocument(),
       operationsExecuted: operations,
       timestamp: Date.now() - 2000,
     };
@@ -533,7 +539,10 @@ export class Orchestrator {
       iteration: this.history.getLegacySnapshots().length,
       score: revisionResult.finalScore || evaluation.overallScore,
       status: 'executed',
-      documentSnapshot: this.documentEngine.getDocument(),
+      // Phase 14.3.2 (Fix 6 + 6a) — capture canonical MaestroDocumentModel via
+      // cloneDocument() (deep clone), NOT getDocument() (legacy model, no layers)
+      // and NOT getRealDocument() (returns a reference that mutates with the doc).
+      documentSnapshot: this.documentEngine.realEngine.cloneDocument(),
       operationsExecuted: operations,
       timestamp: Date.now(),
     };

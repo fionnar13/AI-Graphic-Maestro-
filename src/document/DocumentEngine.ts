@@ -48,10 +48,24 @@ export class DocumentEngine {
     });
   }
 
+  /**
+   * @deprecated Phase 14.3.2 — Use {@link MaestroDocumentEngine.cloneDocument} via
+   *   `realEngine.cloneDocument()` instead. This method returns the LEGACY
+   *   `MaestroDocument` model (metadata + assets + rootNodeId) which does NOT
+   *   include the canonical layer tree. Snapshots captured via this method
+   *   will lose all layer data on restore. See
+   *   docs/PHASE_14.3.2_IMPLEMENTATION_PLAN.md §4 (Fix 6).
+   */
   public getDocument(): MaestroDocument {
     return JSON.parse(JSON.stringify(this.document));
   }
 
+  /**
+   * @deprecated Phase 14.3.2 — Returns a REFERENCE (not a deep clone) to the
+   *   canonical `MaestroDocumentModel`. Callers that need a snapshot MUST use
+   *   `realEngine.cloneDocument()` to avoid capturing a mutating reference.
+   *   See docs/PHASE_14.3.2_IMPLEMENTATION_PLAN.md §1 (Q11 finding).
+   */
   public getRealDocument(): MaestroDocumentModel {
     return this.realEngine.getDocument();
   }

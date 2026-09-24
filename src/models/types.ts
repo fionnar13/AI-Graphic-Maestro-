@@ -3,6 +3,8 @@
  * Explicit typed contracts for all subsystems without simulated falsehoods.
  */
 
+import type { MaestroDocumentModel } from './document.types';
+
 export type DimensionUnit = 'px' | 'pt' | 'percent';
 
 export interface RectDimensions {
@@ -265,7 +267,13 @@ export interface HistorySnapshot {
   iteration: number;
   score: number;
   status: 'executed' | 'rollback' | 'active';
-  documentSnapshot: MaestroDocument;
+  /**
+   * Phase 14.3.2 (Fix 6) — Widened from `MaestroDocument` (legacy, no layers)
+   * to a union that also accepts the canonical `MaestroDocumentModel` (with
+   * full layer tree). Orchestrator snapshot captures now use
+   * `realEngine.cloneDocument()` which returns `MaestroDocumentModel`.
+   */
+  documentSnapshot: MaestroDocument | MaestroDocumentModel;
   operationsExecuted: DSLOperation[];
   timestamp: number;
 }
