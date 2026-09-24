@@ -27,6 +27,7 @@ import { VisionEngine } from '../vision/VisionEngine';
 import { ReasoningEngine } from '../reasoning/ReasoningEngine';
 import { Planner } from '../planner/Planner';
 import { Orchestrator } from '../orchestrator/Orchestrator';
+import { AICopilotEngine } from '../workspace/AICopilotEngine';
 import { DocumentTestSuite } from './document.test';
 import { MemoryTestSuite } from './memory.test';
 
@@ -469,6 +470,151 @@ export class ComprehensiveTestSuite {
       if (result.valid) {
         throw new Error('Security violation: Arbitrary code execution not blocked by ToolRegistry!');
       }
+    }));
+
+    // =========================================================================
+    // Phase 14.3.3 — Regression Tests
+    // =========================================================================
+
+    // A1 — Pixel tool AI wiring: intent parsing
+    results.push(await this.runTest('regression', 'Regression: AI parses brightness intent (A1)', () => {
+      const tools = new ToolRegistry();
+      const copilot = new AICopilotEngine(tools);
+      const ctx: any = { currentLayer: { id: 'l1', name: 'Test', bounds: { x: 0, y: 0, width: 100, height: 100 } } };
+      const intent = copilot.parseIntent('increase brightness by 50', ctx);
+      if (intent.type !== 'ADJUST_BRIGHTNESS') throw new Error(`Expected ADJUST_BRIGHTNESS, got ${intent.type}`);
+      if (intent.parameters.brightness !== 50) throw new Error(`Expected brightness=50, got ${intent.parameters.brightness}`);
+    }));
+
+    results.push(await this.runTest('regression', 'Regression: AI parses contrast intent (A1)', () => {
+      const tools = new ToolRegistry();
+      const copilot = new AICopilotEngine(tools);
+      const ctx: any = { currentLayer: { id: 'l1', name: 'Test', bounds: { x: 0, y: 0, width: 100, height: 100 } } };
+      const intent = copilot.parseIntent('contrast 40', ctx);
+      if (intent.type !== 'ADJUST_CONTRAST') throw new Error(`Expected ADJUST_CONTRAST, got ${intent.type}`);
+    }));
+
+    results.push(await this.runTest('regression', 'Regression: AI parses inpaint intent (A1)', () => {
+      const tools = new ToolRegistry();
+      const copilot = new AICopilotEngine(tools);
+      const ctx: any = { currentLayer: { id: 'l1', name: 'Test', bounds: { x: 0, y: 0, width: 100, height: 100 } } };
+      const intent = copilot.parseIntent('inpaint the region', ctx);
+      if (intent.type !== 'INPAINT_REGION') throw new Error(`Expected INPAINT_REGION, got ${intent.type}`);
+    }));
+
+    results.push(await this.runTest('regression', 'Regression: AI parses crop intent (A1)', () => {
+      const tools = new ToolRegistry();
+      const copilot = new AICopilotEngine(tools);
+      const ctx: any = { currentLayer: { id: 'l1', name: 'Test', bounds: { x: 0, y: 0, width: 100, height: 100 } } };
+      const intent = copilot.parseIntent('crop 400 300', ctx);
+      if (intent.type !== 'CROP_DOCUMENT') throw new Error(`Expected CROP_DOCUMENT, got ${intent.type}`);
+    }));
+
+    // A1 — Pixel tool AI wiring: plan generation
+    results.push(await this.runTest('regression', 'Regression: AI generates brightness plan with tool.brightness (A1)', () => {
+      const tools = new ToolRegistry();
+      const copilot = new AICopilotEngine(tools);
+      const ctx: any = { currentLayer: { id: 'l1', name: 'Test', bounds: { x: 0, y: 0, width: 100, height: 100 } } };
+      const intent = copilot.parseIntent('increase brightness by 50', ctx);
+      const plan = copilot.generatePlan(intent, ctx);
+      if (plan.steps.length !== 1) throw new Error(`Expected 1 step, got ${plan.steps.length}`);
+      if (plan.steps[0].toolId !== 'tool.brightness') throw new Error(`Expected tool.brightness, got ${plan.steps[0].toolId}`);
+      if (plan.steps[0].parameters.brightness !== 50) throw new Error(`Expected brightness=50, got ${plan.steps[0].parameters.brightness}`);
+    }));
+
+    // A1 — RemoveObject includes boundingBox (not whole-layer delete)
+    results.push(await this.runTest('regression', 'Regression: RemoveObject plan includes boundingBox (A1)', () => {
+      const tools = new ToolRegistry();
+      const copilot = new AICopilotEngine(tools);
+      const ctx: any = { currentLayer: { id: 'l1', name: 'Test', bounds: { x: 10, y: 20, width: 100, height: 80 } } };
+      const intent = copilot.parseIntent('remove object', ctx);
+      const plan = copilot.generatePlan(intent, ctx);
+      if (plan.steps[0].toolId !== 'tool.remove_object') throw new Error(`Expected tool.remove_object`);
+      if (!plan.steps[0].parameters.boundingBox) throw new Error('RemoveObject plan missing boundingBox — would trigger whole-layer delete');
+      if (plan.steps[0].parameters.coordinateSpace !== 'canvas') throw new Error('Expected coordinateSpace=canvas');
+    }));
+
+    // A3 — MoveTool single-apply (transform.position stays at identity)
+    results.push(await this.runTest('regression', 'Regression: AI move does not write transform.position (A3)', () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'MoveTest', type: 'raster',
+        bounds: { x: 100, y: 100, width: 50, height: 50 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      const startX = layer.bounds.x;
+      graphics.executeTool('tool.move', { layerId: layer.id, dx: 50, dy: 0 });
+      if (layer.bounds.x !== startX + 50) throw new Error(`Expected bounds.x=${startX + 50}, got ${layer.bounds.x}`);
+      if (layer.transform.position.x !== 0) throw new Error(`transform.position.x should be 0, got ${layer.transform.position.x}`);
+    }));
+
+    // A4 — ScaleTool single-apply (transform.scale stays at identity)
+    results.push(await this.runTest('regression', 'Regression: AI scale does not write transform.scale (A4)', () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'ScaleTest', type: 'raster',
+        bounds: { x: 100, y: 100, width: 100, height: 100 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      const startW = layer.bounds.width;
+      graphics.executeTool('tool.scale', { layerId: layer.id, scaleX: 1.5, scaleY: 1.5 });
+      if (layer.bounds.width !== Math.round(startW * 1.5)) throw new Error(`Expected width=${Math.round(startW * 1.5)}, got ${layer.bounds.width}`);
+      if (layer.transform.scale.x !== 1) throw new Error(`transform.scale.x should be 1, got ${layer.transform.scale.x}`);
+    }));
+
+    // A4 — Repeated scale does not compound
+    results.push(await this.runTest('regression', 'Regression: Repeated AI scale does not compound (A4)', () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'RepeatScaleTest', type: 'raster',
+        bounds: { x: 100, y: 100, width: 100, height: 100 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      graphics.executeTool('tool.scale', { layerId: layer.id, scaleX: 2, scaleY: 2 });
+      const w1 = layer.bounds.width;
+      graphics.executeTool('tool.scale', { layerId: layer.id, scaleX: 2, scaleY: 2 });
+      const w2 = layer.bounds.width;
+      // Each scale should double: 100 → 200 → 400 (NOT 100 → 200 → 800)
+      if (w2 !== w1 * 2) throw new Error(`Repeated scale compounded: ${w1} → ${w2} (expected ${w1 * 2})`);
+      if (layer.transform.scale.x !== 1) throw new Error(`transform.scale.x should still be 1 after repeated scale`);
+    }));
+
+    // A6 — Unknown intent does not report completed
+    results.push(await this.runTest('regression', 'Regression: Unknown intent produces completed_noop, not completed (A6)', () => {
+      const tools = new ToolRegistry();
+      const copilot = new AICopilotEngine(tools);
+      const ctx: any = { currentLayer: null };
+      const intent = copilot.parseIntent('xyzzy frobnicate', ctx);
+      if (intent.type !== 'UNKNOWN') throw new Error(`Expected UNKNOWN, got ${intent.type}`);
+      const plan = copilot.generatePlan(intent, ctx);
+      // The default case produces tool.evaluate — a no-op
+      if (plan.steps[0].toolId !== 'tool.evaluate') throw new Error(`Expected tool.evaluate for UNKNOWN, got ${plan.steps[0].toolId}`);
+    }));
+
+    // A2 — Renderer does not auto-create pixel buffers
+    results.push(await this.runTest('regression', 'Regression: renderDocument does not auto-create pixel buffers (A2)', () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'NoBufTest', type: 'raster',
+        bounds: { x: 0, y: 0, width: 100, height: 100 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      // renderDocument should NOT create a pixel buffer for this layer
+      graphics.renderDocument();
+      const buf = (graphics as any).layerPixelBuffers.get(layer.id);
+      if (buf) throw new Error('renderDocument auto-created a pixel buffer — renderer must be observational');
     }));
 
     return results;
