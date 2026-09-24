@@ -386,6 +386,7 @@ export const AppShell: React.FC = () => {
             {/* Center Canvas Stage */}
             <CanvasWorkspace
               graphicsEngine={orchestrator.graphicsEngine}
+              historyEngine={orchestrator.history}
               activeToolId={activeToolId}
               onSelectTool={(id) => setActiveToolId(id)}
               selectedLayerId={selectedLayerId}

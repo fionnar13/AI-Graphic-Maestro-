@@ -648,8 +648,19 @@ export class GraphicsEngine {
   /**
    * Renders the complete Document onto the real 2D Canvas.
    * Traverses all layers in stacking order (respecting z-order, opacity, visibility, and blend mode).
+   *
+   * Phase 14.3.2 (Fix 2, T3) — Optional `previewOverrides` parameter enables
+   * live drag preview WITHOUT mutating the authoritative document. When the
+   * renderer encounters a layer whose id matches `previewOverrides.layerId`,
+   * it uses the preview bounds/transform instead of the layer's committed
+   * values. The document itself is NOT mutated during drag — only on
+   * mouseUp does CanvasWorkspace commit a DocumentMutationCommand.
    */
-  public renderDocument(): void {
+  public renderDocument(previewOverrides?: {
+    layerId: string;
+    bounds?: { x: number; y: number; width: number; height: number };
+    transform?: { rotation?: number };
+  }): void {
     const { ctx, canvas } = this;
     if (!ctx || !canvas) return;
 
@@ -676,12 +687,27 @@ export class GraphicsEngine {
       ctx.globalAlpha = Math.max(0, Math.min(1, layer.opacity));
       ctx.globalCompositeOperation = this.toCanvasCompositeOperation(layer.blendMode);
 
-      const b = layer.bounds;
-      const t = layer.transform || {
-        position: { x: 0, y: 0 },
-        scale: { x: 1, y: 1 },
-        rotation: 0,
-      };
+      // Phase 14.3.2 (Fix 2) — Apply preview overrides for the dragged layer.
+      const isPreview = previewOverrides && previewOverrides.layerId === layer.id;
+      const b = isPreview && previewOverrides!.bounds
+        ? previewOverrides!.bounds!
+        : layer.bounds;
+      const t = isPreview && previewOverrides!.transform
+        ? {
+            ...(layer.transform || {
+              position: { x: 0, y: 0 },
+              scale: { x: 1, y: 1 },
+              rotation: 0,
+            }),
+            ...(previewOverrides!.transform!.rotation !== undefined
+              ? { rotation: previewOverrides!.transform!.rotation }
+              : {}),
+          }
+        : layer.transform || {
+            position: { x: 0, y: 0 },
+            scale: { x: 1, y: 1 },
+            rotation: 0,
+          };
 
       // Apply Layer Transform
       ctx.translate(b.x + b.width / 2 + (t.position?.x || 0), b.y + b.height / 2 + (t.position?.y || 0));

@@ -8,6 +8,8 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { GraphicsEngine } from '../graphics/GraphicsEngine';
+import { HistoryEngine } from '../history/HistoryEngine';
+import { DocumentMutationCommand } from '../history/commands/DocumentMutationCommand';
 import { DocumentLayer } from '../models/document.types';
 import {
   ZoomIn,
@@ -30,6 +32,10 @@ import { ToolId, WorkspaceMode, TransformHandle } from './types';
 
 interface CanvasWorkspaceProps {
   graphicsEngine: GraphicsEngine;
+  // Phase 14.3.2 (Fix 2, T3) — historyEngine is now REQUIRED so canvas drag
+  // operations can commit DocumentMutationCommand entries through the
+  // authoritative history pipeline.
+  historyEngine: HistoryEngine;
   activeToolId: ToolId;
   onSelectTool?: (toolId: ToolId) => void;
   selectedLayerId: string | null;
@@ -52,6 +58,7 @@ interface CanvasWorkspaceProps {
 
 export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   graphicsEngine,
+  historyEngine,
   activeToolId,
   onSelectTool,
   selectedLayerId,
@@ -96,6 +103,16 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     height: 0,
   });
   const [initialRotation, setInitialRotation] = useState<number>(0);
+
+  // Phase 14.3.2 (Fix 2, T3) — Live preview state. During drag, the document
+  // is NOT mutated. Instead, previewBounds/previewRotation hold the would-be
+  // committed values and renderDocument() reads them via previewOverrides.
+  // On mouseUp, a DocumentMutationCommand commits the final values atomically
+  // (one history entry per drag gesture). Escape sets dragCancelled=true to
+  // discard the preview without committing.
+  const [previewBounds, setPreviewBounds] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [previewRotation, setPreviewRotation] = useState<number | null>(null);
+  const dragCancelled = useRef<boolean>(false);
 
   // Crop mode state
   const [cropBox, setCropBox] = useState<{ x: number; y: number; width: number; height: number }>({
@@ -146,6 +163,30 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       window.removeEventListener('keyup', handleKeyUp);
     };
   }, [activeToolId, cropBox]);
+
+  // Phase 14.3.2 (Fix 2, T3) — Escape key during drag cancels the gesture.
+  // Sets dragCancelled ref so handleMouseUp knows to discard the preview
+  // without committing a DocumentMutationCommand. Per Q3-i, no history
+  // entry is created for a cancelled drag.
+  useEffect(() => {
+    if (!isManipulating) return;
+    const handleDragEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        dragCancelled.current = true;
+        setIsManipulating(false);
+        setManipulationType(null);
+        setActiveHandle(null);
+        setPreviewBounds(null);
+        setPreviewRotation(null);
+        graphicsEngine.renderDocument();
+      }
+    };
+    window.addEventListener('keydown', handleDragEscape);
+    return () => {
+      window.removeEventListener('keydown', handleDragEscape);
+    };
+  }, [isManipulating, graphicsEngine]);
 
   // Sync canvas DOM element from GraphicsEngine
   useEffect(() => {
@@ -328,6 +369,10 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       setDragStartPos({ x: e.clientX, y: e.clientY });
       setInitialBounds({ ...hitLayer.bounds });
       setInitialRotation(hitLayer.transform?.rotation || 0);
+      // Phase 14.3.2 (Fix 2) — reset dragCancelled at gesture start
+      dragCancelled.current = false;
+      setPreviewBounds(null);
+      setPreviewRotation(null);
     } else {
       // Clicked on empty canvas space
       if (!isManipulating) {
@@ -350,6 +395,10 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     setDragStartPos({ x: e.clientX, y: e.clientY });
     setInitialBounds({ ...layer.bounds });
     setInitialRotation(layer.transform?.rotation || 0);
+    // Phase 14.3.2 (Fix 2) — reset dragCancelled at gesture start
+    dragCancelled.current = false;
+    setPreviewBounds(null);
+    setPreviewRotation(null);
 
     if (handle === 'rot') {
       setManipulationType('rotate');
@@ -378,6 +427,9 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
     }
 
     // Direct Manipulation (Move / Scale / Rotate)
+    // Phase 14.3.2 (Fix 2, T3) — During drag, the document is NOT mutated.
+    // Preview bounds/rotation are stored in React state and passed to
+    // renderDocument() via previewOverrides. Commit happens on mouseUp.
     if (isManipulating && selectedLayer && manipulationType) {
       const deltaX = (e.clientX - dragStartPos.x) / zoom;
       const deltaY = (e.clientY - dragStartPos.y) / zoom;
@@ -385,8 +437,13 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
       if (manipulationType === 'move') {
         const nextX = Math.round(initialBounds.x + deltaX);
         const nextY = Math.round(initialBounds.y + deltaY);
-        graphicsEngine.getDocumentEngine().setBounds(selectedLayer.id, { x: nextX, y: nextY });
-        graphicsEngine.renderDocument();
+        const nextBounds = { ...initialBounds, x: nextX, y: nextY };
+        setPreviewBounds(nextBounds);
+        setPreviewRotation(null);
+        graphicsEngine.renderDocument({
+          layerId: selectedLayer.id,
+          bounds: nextBounds,
+        });
       } else if (manipulationType === 'scale' && activeHandle) {
         let newX = initialBounds.x;
         let newY = initialBounds.y;
@@ -406,13 +463,13 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
           newH = h;
         }
 
-        graphicsEngine.getDocumentEngine().setBounds(selectedLayer.id, {
-          x: newX,
-          y: newY,
-          width: newW,
-          height: newH,
+        const nextBounds = { x: newX, y: newY, width: newW, height: newH };
+        setPreviewBounds(nextBounds);
+        setPreviewRotation(null);
+        graphicsEngine.renderDocument({
+          layerId: selectedLayer.id,
+          bounds: nextBounds,
         });
-        graphicsEngine.renderDocument();
       } else if (manipulationType === 'rotate') {
         const { x: canvasX, y: canvasY } = getCanvasCoords(e.clientX, e.clientY);
         const centerX = initialBounds.x + initialBounds.width / 2;
@@ -422,8 +479,12 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
         if (e.shiftKey) {
           deg = Math.round(deg / 15) * 15; // 15-deg snap with Shift
         }
-        graphicsEngine.getDocumentEngine().setTransform(selectedLayer.id, { rotation: deg });
-        graphicsEngine.renderDocument();
+        setPreviewBounds(null);
+        setPreviewRotation(deg);
+        graphicsEngine.renderDocument({
+          layerId: selectedLayer.id,
+          transform: { rotation: deg },
+        });
       }
       return;
     }
@@ -467,14 +528,58 @@ export const CanvasWorkspace: React.FC<CanvasWorkspaceProps> = ({
   };
 
   // Pointer Up
+  // Phase 14.3.2 (Fix 2, T3) — On mouseUp, commit a single
+  // DocumentMutationCommand for the entire drag gesture (one history entry
+  // per drag). If dragCancelled (Escape), discard preview without committing.
   const handleMouseUp = () => {
     if (isPanning) {
       setIsPanning(false);
     }
     if (isManipulating) {
+      const wasCancelled = dragCancelled.current;
+      const layerId = selectedLayer?.id;
+      const finalBounds = previewBounds;
+      const finalRotation = previewRotation;
+      const currentManipulationType = manipulationType;
+
       setIsManipulating(false);
       setManipulationType(null);
       setActiveHandle(null);
+      setPreviewBounds(null);
+      setPreviewRotation(null);
+
+      // Commit only if NOT cancelled AND there is an actual change to commit
+      if (!wasCancelled && layerId && (finalBounds || finalRotation !== null)) {
+        const documentEngine = graphicsEngine.getDocumentEngine();
+        const mutator = (doc: typeof documentEngine) => {
+          if (finalBounds) {
+            doc.setBounds(layerId, finalBounds);
+          }
+          if (finalRotation !== null && currentManipulationType === 'rotate') {
+            doc.setTransform(layerId, { rotation: finalRotation });
+          }
+        };
+        const cmdName =
+          currentManipulationType === 'move'
+            ? 'Canvas Drag Move'
+            : currentManipulationType === 'scale'
+            ? 'Canvas Drag Scale'
+            : currentManipulationType === 'rotate'
+            ? 'Canvas Drag Rotate'
+            : 'Canvas Drag Transform';
+        const cmd = new DocumentMutationCommand(
+          cmdName,
+          `ui.canvas_drag.${currentManipulationType}`,
+          { layerId, bounds: finalBounds, rotation: finalRotation },
+          documentEngine,
+          mutator,
+          graphicsEngine
+        );
+        void historyEngine.executeCommand(cmd);
+      } else {
+        // Cancelled or no-op: re-render to discard preview, restore committed state
+        graphicsEngine.renderDocument();
+      }
       if (onLayerUpdate) onLayerUpdate();
     }
     if (isCroppingDrag) {
