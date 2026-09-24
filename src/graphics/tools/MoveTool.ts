@@ -45,15 +45,13 @@ export class MoveTool implements IGraphicsTool {
     }
 
     const layer = context.documentEngine.getLayer(params.layerId)!;
-    const prevPosition = { ...layer.transform.position };
     const prevBounds = { ...layer.bounds };
 
-    const newX = layer.transform.position.x + params.dx;
-    const newY = layer.transform.position.y + params.dy;
-
-    context.documentEngine.setTransform(layer.id, {
-      position: { x: newX, y: newY },
-    });
+    // Phase 14.3.3 (A3) — Only write bounds.x/y, NOT transform.position.
+    // The renderer sums bounds.x + transform.position.x, so writing both
+    // causes a double-apply (2× the intended delta). The manual canvas-drag
+    // path (Fix 2 from Phase 14.3.2) already follows this contract — it
+    // writes only bounds and leaves transform.position at identity {0,0}.
     context.documentEngine.setBounds(layer.id, {
       x: layer.bounds.x + params.dx,
       y: layer.bounds.y + params.dy,
@@ -65,20 +63,16 @@ export class MoveTool implements IGraphicsTool {
       affectedLayerIds: [layer.id],
       rollbackData: {
         layerId: layer.id,
-        prevPosition,
         prevBounds,
       },
       output: {
-        newPosition: { x: newX, y: newY },
+        newPosition: { x: layer.bounds.x, y: layer.bounds.y },
         bounds: layer.bounds,
       },
     };
   }
 
   public rollback(context: ToolExecutionContext, rollbackData: any): boolean {
-    context.documentEngine.setTransform(rollbackData.layerId, {
-      position: rollbackData.prevPosition,
-    });
     context.documentEngine.setBounds(rollbackData.layerId, rollbackData.prevBounds);
     return true;
   }

@@ -138,8 +138,9 @@ async function runGraphicsTestSuite() {
   });
 
   await test('Tool 3: MoveTool (Delta translation with rollback)', async () => {
-    const startX = testLayer.transform.position.x;
-    const startY = testLayer.transform.position.y;
+    // Phase 14.3.3 (A3) — MoveTool now writes only bounds.x/y (not transform.position)
+    const startX = testLayer.bounds.x;
+    const startY = testLayer.bounds.y;
 
     const res = await engine.executeTool('tool.move', {
       layerId: testLayer.id,
@@ -147,11 +148,14 @@ async function runGraphicsTestSuite() {
       dy: -20,
     });
     assert(res.success === true, 'Move executed');
-    assert(testLayer.transform.position.x === startX + 45, 'Layer moved X by 45');
-    assert(testLayer.transform.position.y === startY - 20, 'Layer moved Y by -20');
+    assert(testLayer.bounds.x === startX + 45, 'Layer moved X by 45');
+    assert(testLayer.bounds.y === startY - 20, 'Layer moved Y by -20');
+    assert(testLayer.transform.position.x === 0, 'transform.position stays at identity (A3)');
+    assert(testLayer.transform.position.y === 0, 'transform.position stays at identity (A3)');
 
     await engine.rollback();
-    assert(testLayer.transform.position.x === startX, 'Rollback restored X position');
+    assert(testLayer.bounds.x === startX, 'Rollback restored X bounds');
+    assert(testLayer.bounds.y === startY, 'Rollback restored Y bounds');
   });
 
   await test('Tool 4: ScaleTool (Uniform and non-uniform scaling)', async () => {
@@ -451,29 +455,31 @@ async function runGraphicsTestSuite() {
 
   await test('Multi-step Undo/Redo stack preserves deterministic state', async () => {
     engine.clearHistory();
-    const initX = testLayer.transform.position.x;
+    // Phase 14.3.3 (A3) — check bounds.x (authoritative), not transform.position
+    const initX = testLayer.bounds.x;
 
     // Step 1: Move by 20
     await engine.executeTool('tool.move', { layerId: testLayer.id, dx: 20, dy: 0 });
     // Step 2: Move by 30
     await engine.executeTool('tool.move', { layerId: testLayer.id, dx: 30, dy: 0 });
-    assert(testLayer.transform.position.x === initX + 50, 'Position is +50 after 2 moves');
+    assert(testLayer.bounds.x === initX + 50, 'Position is +50 after 2 moves');
+    assert(testLayer.transform.position.x === 0, 'transform.position stays at identity (A3)');
 
     // Undo step 2
     await engine.rollback();
-    assert(testLayer.transform.position.x === initX + 20, 'Position is +20 after 1 rollback');
+    assert(testLayer.bounds.x === initX + 20, 'Position is +20 after 1 rollback');
 
     // Undo step 1
     await engine.rollback();
-    assert(testLayer.transform.position.x === initX, 'Position restored to initial');
+    assert(testLayer.bounds.x === initX, 'Position restored to initial');
 
     // Redo step 1
     await engine.redo();
-    assert(testLayer.transform.position.x === initX + 20, 'Redo step 1 restored +20');
+    assert(testLayer.bounds.x === initX + 20, 'Redo step 1 restored +20');
 
     // Redo step 2
     await engine.redo();
-    assert(testLayer.transform.position.x === initX + 50, 'Redo step 2 restored +50');
+    assert(testLayer.bounds.x === initX + 50, 'Redo step 2 restored +50');
   });
 
   await test('Hardware capability detector detects environment matrix', () => {
