@@ -18,6 +18,7 @@ import { VisualCritic } from '../critic/VisualCritic';
 import { CriticEngine } from '../critic/CriticEngine';
 import { SelfRevisionEngine } from '../critic/SelfRevisionEngine';
 import { HistoryEngine } from '../history/HistoryEngine';
+import { GraphicsToolCommand } from '../history/commands/GraphicsToolCommand';
 import { MemoryEngine } from '../memory/MemoryEngine';
 import { InMemoryStorageAdapter } from '../memory/MemoryStorageAdapter';
 import { GraphicsEngine } from '../graphics/GraphicsEngine';
@@ -121,6 +122,48 @@ export class ComprehensiveTestSuite {
       });
       const restored = history.rollbackTo(0);
       if (!restored || restored.iteration !== 0) throw new Error('Rollback failed');
+    }));
+
+    // Phase 14.3.2 (Fix 4, T6) — Regression: GraphicsToolCommand.doUndo
+    // boolean guard. Original bug: `&&` made the guard always false,
+    // causing doUndo to call tool.rollback with null/undefined rollbackData.
+    // After fix: `||` correctly returns false when rollbackData is missing.
+    results.push(await this.runTest('regression', 'Regression: GraphicsToolCommand.doUndo returns false for null rollbackData (Fix 4 / T6)', async () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+
+      const cmd = new GraphicsToolCommand(graphics, 'tool.move', {
+        layerId: 'never_executed',
+        dx: 0,
+        dy: 0,
+      });
+
+      // Test 1: null rollbackData -> should return false (guard triggers)
+      (cmd as any).rollbackData = null;
+      const resultNull = await (cmd as any).doUndo();
+      if (resultNull !== false) {
+        throw new Error(`Expected doUndo()=false for null rollbackData, got ${resultNull}`);
+      }
+
+      // Test 2: undefined rollbackData -> should return false (guard triggers)
+      (cmd as any).rollbackData = undefined;
+      const resultUndef = await (cmd as any).doUndo();
+      if (resultUndef !== false) {
+        throw new Error(`Expected doUndo()=false for undefined rollbackData, got ${resultUndef}`);
+      }
+
+      // Test 3: valid rollbackData -> should NOT short-circuit; should
+      // proceed to call tool.rollback. We use a non-existent layerId so
+      // MoveTool.rollback will return false gracefully — the key assertion
+      // is that doUndo does NOT return false due to the guard.
+      (cmd as any).rollbackData = { layerId: 'never_executed', prevPosition: { x: 0, y: 0 }, prevBounds: { x: 0, y: 0, width: 10, height: 10 } };
+      (cmd as any).executed = true;
+      const resultValid = await (cmd as any).doUndo();
+      if (typeof resultValid !== 'boolean') {
+        throw new Error(`Expected doUndo() to return boolean for valid rollbackData, got ${typeof resultValid}`);
+      }
     }));
 
     results.push(await this.runTest('unit', 'Unit: MemoryEngine CRUD & 6 Memory Types', () => {

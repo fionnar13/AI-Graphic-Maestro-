@@ -58,7 +58,14 @@ export class GraphicsToolCommand extends BaseCommand {
   }
 
   protected async doUndo(): Promise<boolean> {
-    if (this.rollbackData === null && this.rollbackData === undefined) {
+    // Phase 14.3.2 (Fix 4, T6) — Bug: original guard used `&&` which made
+    // the condition always false (no value can be both null AND undefined).
+    // Corrected to `||` so doUndo returns false immediately when
+    // rollbackData is missing, instead of proceeding to call tool.rollback
+    // with null/undefined (which would crash or silently fail). Per Q10-i
+    // the safe behavior is to return false — HistoryEngine.undo() handles
+    // failure by pushing the command back onto the undo stack.
+    if (this.rollbackData === null || this.rollbackData === undefined) {
       return false;
     }
 
