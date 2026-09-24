@@ -947,6 +947,11 @@ export class AICopilotEngine {
     const reg = engines.toolRegistry || this.toolRegistry;
     plan.status = 'executing';
     let executedCount = 0;
+    // Phase 14.3.3 (A6) — Track whether any real document mutation occurred.
+    // tool.evaluate is a no-op evaluator that returns success without mutation.
+    // The plan should NOT report "COMPLETED" with "Canvas & Document updated"
+    // when no actual mutation happened.
+    let documentMutated = false;
 
     for (let i = 0; i < plan.steps.length; i++) {
       const step = plan.steps[i];
@@ -1077,6 +1082,13 @@ export class AICopilotEngine {
       step.output = res.output;
       executedCount++;
 
+      // Phase 14.3.3 (A6) — Track real mutation. tool.evaluate is a no-op
+      // evaluator that returns success without any document mutation.
+      // Any other tool that succeeds is considered a real mutation.
+      if (step.toolId !== 'tool.evaluate') {
+        documentMutated = true;
+      }
+
       if (engines.historyEngine) {
         const opRecord: OperationRecord = {
           operationId: `op_ai_${Date.now()}_${i}`,
@@ -1094,18 +1106,27 @@ export class AICopilotEngine {
       }
 
       // 7. Activity: Result Phase
+      // Phase 14.3.3 (A6) — Accurate status message. Only say "Canvas &
+      // Document updated" when a real mutation occurred. tool.evaluate and
+      // other no-op tools should not claim document mutation.
+      const isMutationStep = step.toolId !== 'tool.evaluate';
       onActivity?.({
         id: `act_${Date.now()}_res`,
         timestamp: Date.now(),
         phase: 'Result',
         toolId: step.toolId,
-        summary: `Success (${res.durationMs}ms): Canvas & Document updated`,
+        summary: isMutationStep
+          ? `Success (${res.durationMs}ms): Canvas & Document updated`
+          : `Success (${res.durationMs}ms): Evaluated — no document changes`,
         status: 'success',
         durationMs: res.durationMs,
       });
     }
 
-    plan.status = 'completed';
+    // Phase 14.3.3 (A6) — Plan status reflects actual mutation.
+    // 'completed' = at least one step mutated the document.
+    // 'completed_noop' = all steps were no-ops (e.g., tool.evaluate).
+    plan.status = documentMutated ? 'completed' : 'completed_noop';
     plan.completedAt = Date.now();
 
     return {

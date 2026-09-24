@@ -59,7 +59,7 @@ export interface CopilotPlan {
   intent: CopilotIntent;
   title: string;
   isRisky: boolean;
-  status: 'awaiting_approval' | 'executing' | 'completed' | 'failed' | 'cancelled';
+  status: 'awaiting_approval' | 'executing' | 'completed' | 'completed_noop' | 'failed' | 'cancelled';
   steps: CopilotPlanStep[];
   createdAt: number;
   completedAt?: number;
