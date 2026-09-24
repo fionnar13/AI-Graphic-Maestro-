@@ -365,6 +365,89 @@ export class AICopilotEngine {
       };
     }
 
+    // Phase 14.3.3 (A1) — Pixel tool intent mappings
+    // Brightness
+    if (p.includes('brightness') || p.includes('brighten') || p.includes('darken') ||
+        p.includes('روشن') || p.includes('تاریک') || p.includes('روشنی')) {
+      let brightness = 50;
+      const numMatch = p.match(/(-?\d+)/);
+      if (numMatch) brightness = Math.max(-100, Math.min(100, parseInt(numMatch[1])));
+      if (p.includes('darken') || p.includes('تاریک')) brightness = -Math.abs(brightness);
+      return {
+        type: 'ADJUST_BRIGHTNESS', title: 'Adjust Brightness', confidence: 0.92,
+        parameters: { brightness }, isMultiStep: false, isRisky: false,
+      };
+    }
+    // Contrast
+    if (p.includes('contrast') || p.includes('کنتراست')) {
+      let contrast = 30;
+      const numMatch = p.match(/(-?\d+)/);
+      if (numMatch) contrast = Math.max(-100, Math.min(100, parseInt(numMatch[1])));
+      return {
+        type: 'ADJUST_CONTRAST', title: 'Adjust Contrast', confidence: 0.92,
+        parameters: { contrast }, isMultiStep: false, isRisky: false,
+      };
+    }
+    // Curves
+    if (p.includes('curve') || p.includes('منحنی')) {
+      return {
+        type: 'ADJUST_CURVES', title: 'Adjust Curves', confidence: 0.88,
+        parameters: { controlPoints: [[0, 0], [64, 50], [192, 210], [255, 255]], channel: 'rgb' },
+        isMultiStep: false, isRisky: false,
+      };
+    }
+    // Levels
+    if (p.includes('level') || p.includes('سطوح')) {
+      return {
+        type: 'ADJUST_LEVELS', title: 'Adjust Levels', confidence: 0.88,
+        parameters: { inputBlack: 10, inputWhite: 245, gamma: 1.2, outputBlack: 0, outputWhite: 255 },
+        isMultiStep: false, isRisky: false,
+      };
+    }
+    // Inpaint
+    if (p.includes('inpaint') || p.includes('ترمیم') || p.includes('fill hole') || p.includes('restore')) {
+      return {
+        type: 'INPAINT_REGION', title: 'Inpaint Region', confidence: 0.88,
+        parameters: { radius: 4 }, isMultiStep: false, isRisky: false,
+      };
+    }
+    // Clone
+    if (p.includes('clone') || p.includes('کلون') || p.includes('stamp')) {
+      return {
+        type: 'CLONE_STAMP', title: 'Clone Stamp', confidence: 0.88,
+        parameters: { sourceX: 10, sourceY: 10, targetX: 30, targetY: 30, radius: 20, hardness: 0.8, opacity: 1.0 },
+        isMultiStep: false, isRisky: false,
+      };
+    }
+    // Heal
+    if (p.includes('heal') || p.includes('درمان') || p.includes('patch') || p.includes('repair')) {
+      return {
+        type: 'HEAL_PATCH', title: 'Heal Patch', confidence: 0.88,
+        parameters: { sourceX: 10, sourceY: 10, targetX: 30, targetY: 30, radius: 15 },
+        isMultiStep: false, isRisky: false,
+      };
+    }
+    // Composite
+    if (p.includes('composite') || p.includes('merge') || p.includes('ترکیب') || p.includes('blend layers')) {
+      return {
+        type: 'COMPOSITE_STUDIO', title: 'Composite Layers', confidence: 0.88,
+        parameters: { blendMode: 'normal', opacity: 1.0 }, isMultiStep: false, isRisky: false,
+      };
+    }
+    // Crop
+    if (p.includes('crop') || p.includes('برش')) {
+      let cx = 0, cy = 0, cw = 400, ch = 300;
+      const nums = p.match(/(-?\d+)/g);
+      if (nums && nums.length >= 2) {
+        cw = parseInt(nums[0]); ch = parseInt(nums[1]);
+      }
+      return {
+        type: 'CROP_DOCUMENT', title: 'Crop Document', confidence: 0.88,
+        parameters: { target: 'canvas', x: cx, y: cy, width: cw, height: ch },
+        isMultiStep: false, isRisky: false,
+      };
+    }
+
     // Default fallback
     return {
       type: 'UNKNOWN',
@@ -471,14 +554,21 @@ export class AICopilotEngine {
         break;
 
       case 'REMOVE_OBJECT':
+        // Phase 14.3.3 (A1) — Include boundingBox so RemoveObjectTool inpaints
+        // the region instead of deleting the whole layer. Without boundingBox,
+        // the tool falls through to documentEngine.deleteLayer() which is
+        // destructive and bypasses the inpaint algorithm.
         steps = [
           {
             id: `${planId}_step_1`,
             order: 1,
-            title: `Delete Target Layer (${targetLayerName}) from Document`,
+            title: `Remove Object from Layer (${targetLayerName}) via Inpainting`,
             toolId: 'tool.remove_object',
             parameters: {
               layerId: targetLayerId,
+              boundingBox: context.currentLayer?.bounds || { x: 0, y: 0, width: 100, height: 100 },
+              dilateRadius: 2,
+              coordinateSpace: 'canvas',
             },
             status: 'pending',
           },
@@ -619,6 +709,158 @@ export class AICopilotEngine {
             title: 'Rollback Last Command in History Timeline',
             toolId: 'tool.rollback',
             parameters: {},
+            status: 'pending',
+          },
+        ];
+        break;
+
+      // Phase 14.3.3 (A1) — Pixel tool plan cases
+      case 'ADJUST_BRIGHTNESS':
+        steps = [
+          {
+            id: `${planId}_step_1`, order: 1,
+            title: `Adjust Brightness (${intent.parameters.brightness}) on ${targetLayerName}`,
+            toolId: 'tool.brightness',
+            parameters: { layerId: targetLayerId, brightness: intent.parameters.brightness },
+            status: 'pending',
+          },
+        ];
+        break;
+
+      case 'ADJUST_CONTRAST':
+        steps = [
+          {
+            id: `${planId}_step_1`, order: 1,
+            title: `Adjust Contrast (${intent.parameters.contrast}) on ${targetLayerName}`,
+            toolId: 'tool.contrast',
+            parameters: { layerId: targetLayerId, contrast: intent.parameters.contrast },
+            status: 'pending',
+          },
+        ];
+        break;
+
+      case 'ADJUST_CURVES':
+        steps = [
+          {
+            id: `${planId}_step_1`, order: 1,
+            title: `Adjust Curves on ${targetLayerName}`,
+            toolId: 'tool.curves',
+            parameters: {
+              layerId: targetLayerId,
+              channel: intent.parameters.channel || 'rgb',
+              controlPoints: intent.parameters.controlPoints,
+            },
+            status: 'pending',
+          },
+        ];
+        break;
+
+      case 'ADJUST_LEVELS':
+        steps = [
+          {
+            id: `${planId}_step_1`, order: 1,
+            title: `Adjust Levels on ${targetLayerName}`,
+            toolId: 'tool.levels',
+            parameters: {
+              layerId: targetLayerId,
+              inputBlack: intent.parameters.inputBlack ?? 0,
+              inputWhite: intent.parameters.inputWhite ?? 255,
+              gamma: intent.parameters.gamma ?? 1.0,
+              outputBlack: intent.parameters.outputBlack ?? 0,
+              outputWhite: intent.parameters.outputWhite ?? 255,
+            },
+            status: 'pending',
+          },
+        ];
+        break;
+
+      case 'INPAINT_REGION':
+        steps = [
+          {
+            id: `${planId}_step_1`, order: 1,
+            title: `Inpaint Region on ${targetLayerName}`,
+            toolId: 'tool.inpaint',
+            parameters: {
+              layerId: targetLayerId,
+              maskRegion: context.currentLayer?.bounds || { x: 0, y: 0, width: 50, height: 50 },
+              radius: intent.parameters.radius || 4,
+            },
+            status: 'pending',
+          },
+        ];
+        break;
+
+      case 'CLONE_STAMP':
+        steps = [
+          {
+            id: `${planId}_step_1`, order: 1,
+            title: `Clone Stamp on ${targetLayerName}`,
+            toolId: 'tool.clone',
+            parameters: {
+              layerId: targetLayerId,
+              sourceX: intent.parameters.sourceX,
+              sourceY: intent.parameters.sourceY,
+              targetX: intent.parameters.targetX,
+              targetY: intent.parameters.targetY,
+              radius: intent.parameters.radius,
+              hardness: intent.parameters.hardness ?? 0.8,
+              opacity: intent.parameters.opacity ?? 1.0,
+            },
+            status: 'pending',
+          },
+        ];
+        break;
+
+      case 'HEAL_PATCH':
+        steps = [
+          {
+            id: `${planId}_step_1`, order: 1,
+            title: `Heal Patch on ${targetLayerName}`,
+            toolId: 'tool.heal',
+            parameters: {
+              layerId: targetLayerId,
+              sourceX: intent.parameters.sourceX,
+              sourceY: intent.parameters.sourceY,
+              targetX: intent.parameters.targetX,
+              targetY: intent.parameters.targetY,
+              radius: intent.parameters.radius,
+            },
+            status: 'pending',
+          },
+        ];
+        break;
+
+      case 'COMPOSITE_STUDIO':
+        steps = [
+          {
+            id: `${planId}_step_1`, order: 1,
+            title: `Composite Layers`,
+            toolId: 'tool.composite',
+            parameters: {
+              sourceLayerId: targetLayerId,
+              destLayerId: targetLayerId,
+              blendMode: intent.parameters.blendMode || 'normal',
+              opacity: intent.parameters.opacity ?? 1.0,
+            },
+            status: 'pending',
+          },
+        ];
+        break;
+
+      case 'CROP_DOCUMENT':
+        steps = [
+          {
+            id: `${planId}_step_1`, order: 1,
+            title: `Crop Document`,
+            toolId: 'tool.crop',
+            parameters: {
+              target: intent.parameters.target || 'canvas',
+              layerId: targetLayerId,
+              x: intent.parameters.x ?? 0,
+              y: intent.parameters.y ?? 0,
+              width: intent.parameters.width ?? 400,
+              height: intent.parameters.height ?? 300,
+            },
             status: 'pending',
           },
         ];
