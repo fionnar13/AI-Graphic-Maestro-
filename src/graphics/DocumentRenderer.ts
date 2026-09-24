@@ -13,6 +13,14 @@
  *     * Text (typography, multiline, alignments)
  *     * Adjustment (brightness, contrast, hue saturation via canvas filter)
  *     * Group (nested compositing hierarchy)
+ *
+ * TODO(phase-14.3.2): DocumentRenderer is not called in production
+ * (GraphicsEngine.renderDocument is the runtime renderer). Pixel
+ * buffer integration was added ONLY to GraphicsEngine.renderDocument.
+ * If DocumentRenderer is ever wired into runtime, it must also read
+ * graphicsEngine.getLayerPixelBuffer(layer.id) and blit it OVER the
+ * layer's content. See docs/PHASE_14.3.2_IMPLEMENTATION_PLAN.md §4
+ * (Fix 5).
  */
 
 import {

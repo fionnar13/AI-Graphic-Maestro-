@@ -858,6 +858,30 @@ export class GraphicsEngine {
         }
       }
 
+      // Phase 14.3.2 (Fix 5, T5) — Blit the layer's pixel buffer OVER the
+      // layer's vector/text/raster content. Per Q4-sub: pixel buffer renders
+      // OVER content (destructive-edit semantics for BrightnessTool etc.).
+      // Per §3.2 alpha handling: ctx.globalCompositeOperation is already
+      // 'source-over' (default for layer rendering), so transparent pixels
+      // in the buffer do NOT erase underlying content; fully opaque pixels
+      // replace it. Per Q11 finding, putImageData ignores transforms — we
+      // use an offscreen canvas + drawImage to apply the layer's transform
+      // (translate/rotate/scale) correctly. The transform is already set
+      // on ctx from the layer rendering above, so drawImage at (0, 0, w, h)
+      // in the layer's local coordinate space applies the transform.
+      const pixelBuffer = this.getLayerPixelBuffer(layer.id);
+      if (pixelBuffer && typeof document !== 'undefined' && typeof document.createElement === 'function') {
+        const offscreen = document.createElement('canvas');
+        offscreen.width = pixelBuffer.width;
+        offscreen.height = pixelBuffer.height;
+        const offCtx = offscreen.getContext('2d');
+        if (offCtx) {
+          const imageData = new ImageData(pixelBuffer.data, pixelBuffer.width, pixelBuffer.height);
+          offCtx.putImageData(imageData, 0, 0);
+          ctx.drawImage(offscreen, 0, 0, b.width, b.height);
+        }
+      }
+
       ctx.restore();
     }
 
