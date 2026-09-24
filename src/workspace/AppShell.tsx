@@ -228,14 +228,21 @@ export const AppShell: React.FC = () => {
   };
 
   // Undo / Redo
+  // Phase 14.3.2 (Fix 3, T4) — Replaced renderCanvasComposition() with
+  // graphicsEngine.renderDocument(). The old code OVERWROTE the canvas
+  // with a procedural demo (renderStudioBackground + renderContactShadow
+  // + renderSubject) immediately after undo/redo, discarding the document
+  // state restored by HistoryEngine. From the user's perspective undo
+  // appeared broken. The new code re-renders through the document model
+  // so the canvas reflects the restored state.
   const handleUndo = () => {
     orchestrator.history.undo();
-    renderCanvasComposition();
+    orchestrator.graphicsEngine.renderDocument();
   };
 
   const handleRedo = () => {
     orchestrator.history.redo();
-    renderCanvasComposition();
+    orchestrator.graphicsEngine.renderDocument();
   };
 
   // KPI Items for AI Studio & Activity
