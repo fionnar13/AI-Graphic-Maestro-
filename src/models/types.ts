@@ -149,6 +149,11 @@ export interface ToolParameterDescriptor {
   description: string;
 }
 
+// Phase 14.3.3 — Type aliases for ToolRegistry introspection metadata.
+// These were referenced in ToolRegistry.ts:7 but never exported.
+export type ToolInputDefinition = ToolParameterDescriptor;
+export type ToolOutputDefinition = { name: string; type: string };
+
 export interface ToolDefinition {
   id: string;
   name: string;
