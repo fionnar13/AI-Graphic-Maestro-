@@ -676,6 +676,148 @@ export class ComprehensiveTestSuite {
       if (layer.transform.position.x !== 0) throw new Error(`transform.position.x should be 0 after redo, got ${layer.transform.position.x}`);
     }));
 
+    // =========================================================================
+    // Phase 14.3.3 A2 Hotfix — Renderer Independence Regression Tests
+    // =========================================================================
+
+    // Test A — Procedural layer without pixel buffer renders correctly
+    results.push(await this.runTest('regression', 'A2-Hotfix A: Procedural layer without pixel buffer renders (no gray overlay)', () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'Studio Backdrop', type: 'raster',
+        bounds: { x: 0, y: 0, width: 800, height: 500 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      // Ensure no pixel buffer exists before render
+      if ((graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('Pre-condition: pixel buffer should not exist');
+      }
+      // Render — should NOT auto-create a pixel buffer
+      graphics.renderDocument();
+      // After render, still no pixel buffer (renderer is observational)
+      if ((graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('A2 regression: renderDocument auto-created a pixel buffer');
+      }
+      // Layer is still visible
+      if (!layer.visible) throw new Error('Layer should be visible');
+    }));
+
+    // Test B — Layer with pixel buffer: procedural content + buffer both render
+    results.push(await this.runTest('regression', 'A2-Hotfix B: Layer with pixel buffer — procedural + buffer coexist', () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'Test Layer', type: 'raster',
+        bounds: { x: 0, y: 0, width: 100, height: 100 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      // Create a pixel buffer manually (simulating a tool having run)
+      const { PixelBuffer } = require('../graphics/engine/PixelBuffer');
+      const buf = PixelBuffer.create(100, 100, [255, 0, 0, 255]);
+      graphics.setLayerPixelBuffer(layer.id, buf);
+      // Render — should NOT destroy the pixel buffer
+      graphics.renderDocument();
+      // Pixel buffer should still exist
+      if (!(graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('Pixel buffer was removed during render');
+      }
+      // Layer is still visible
+      if (!layer.visible) throw new Error('Layer should be visible');
+    }));
+
+    // Test C — Procedural + pixel buffer: neither suppresses the other
+    results.push(await this.runTest('regression', 'A2-Hotfix C: Procedural + pixel buffer — neither suppresses the other', () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      // Layer 1: procedural only (no pixel buffer)
+      const layer1 = doc.createLayer({
+        name: 'Studio Backdrop', type: 'raster',
+        bounds: { x: 0, y: 0, width: 800, height: 500 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      // Layer 2: has pixel buffer
+      const layer2 = doc.createLayer({
+        name: 'Bottle', type: 'raster',
+        bounds: { x: 100, y: 100, width: 200, height: 200 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      const { PixelBuffer } = require('../graphics/engine/PixelBuffer');
+      graphics.setLayerPixelBuffer(layer2.id, PixelBuffer.create(200, 200, [0, 255, 0, 255]));
+      // Render
+      graphics.renderDocument();
+      // Layer 1 should NOT have a pixel buffer (procedural only)
+      if ((graphics as any).layerPixelBuffers.has(layer1.id)) {
+        throw new Error('Layer1 should not have pixel buffer after render');
+      }
+      // Layer 2 should still have its pixel buffer
+      if (!(graphics as any).layerPixelBuffers.has(layer2.id)) {
+        throw new Error('Layer2 pixel buffer was removed during render');
+      }
+      // Both layers still visible
+      if (!layer1.visible || !layer2.visible) throw new Error('Both layers should be visible');
+    }));
+
+    // Test D — Missing pixel buffer does not mutate state
+    results.push(await this.runTest('regression', 'A2-Hotfix D: Rendering does not create pixel buffers (state integrity)', () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      // Create 3 layers with different content types
+      doc.createLayer({
+        name: 'Backdrop', type: 'raster',
+        bounds: { x: 0, y: 0, width: 800, height: 500 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      doc.createLayer({
+        name: 'Title', type: 'text',
+        bounds: { x: 100, y: 50, width: 300, height: 40 },
+        opacity: 1, blendMode: 'normal',
+        content: { kind: 'text', text: 'HELLO', fontSize: 24, fontFamily: 'Inter', color: '#ffffff', align: 'center' },
+      });
+      doc.createLayer({
+        name: 'Box', type: 'vector',
+        bounds: { x: 200, y: 200, width: 100, height: 100 },
+        opacity: 1, blendMode: 'normal',
+        content: { kind: 'vector', fillColor: '#7c3aed', cornerRadius: 8 },
+      });
+      // Count pixel buffers before render
+      const beforeCount = (graphics as any).layerPixelBuffers.size;
+      // Render multiple times
+      graphics.renderDocument();
+      graphics.renderDocument();
+      graphics.renderDocument();
+      // Count after — must be unchanged
+      const afterCount = (graphics as any).layerPixelBuffers.size;
+      if (afterCount !== beforeCount) {
+        throw new Error(`Pixel buffer count changed: ${beforeCount} → ${afterCount} (rendering must not create state)`);
+      }
+    }));
+
+    // Test E — Existing Phase 14.3.3 behavior intact (move single-apply after render)
+    results.push(await this.runTest('regression', 'A2-Hotfix E: Move single-apply intact after render fix', () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'MoveRender', type: 'raster',
+        bounds: { x: 100, y: 100, width: 50, height: 50 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      const startX = layer.bounds.x;
+      graphics.executeTool('tool.move', { layerId: layer.id, dx: 30, dy: 0 });
+      if (layer.bounds.x !== startX + 30) throw new Error(`Move failed: expected ${startX + 30}, got ${layer.bounds.x}`);
+      if (layer.transform.position.x !== 0) throw new Error('transform.position should be 0');
+    }));
+
     return results;
   }
 

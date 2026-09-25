@@ -735,7 +735,13 @@ export class GraphicsEngine {
         }
       }
 
-      // Render content based on kind
+      // === PROCEDURAL RENDERING PHASE ===
+      // Phase 14.3.3 (A2 hotfix) — Procedural rendering is INDEPENDENT of
+      // pixel-buffer existence. A layer may have valid procedural content
+      // (text, vector, raster name-based dispatch) without having a pixel
+      // buffer. This block always executes regardless of pixel-buffer state.
+      // The pixel-buffer overlay (below) is a SEPARATE phase that runs AFTER
+      // procedural rendering and only if a buffer exists.
       if (layer.content) {
         if (layer.content.kind === 'text') {
           const tc = layer.content as TextContent;
@@ -858,6 +864,7 @@ export class GraphicsEngine {
         }
       }
 
+      // === PIXEL BUFFER OVERLAY PHASE ===
       // Phase 14.3.2 (Fix 5, T5) — Blit the layer's pixel buffer OVER the
       // layer's vector/text/raster content. Per Q4-sub: pixel buffer renders
       // OVER content (destructive-edit semantics for BrightnessTool etc.).
