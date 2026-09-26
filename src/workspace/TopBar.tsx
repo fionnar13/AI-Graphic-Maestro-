@@ -210,7 +210,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                       }}
                     >
                       {menuDefinitions[menuName].map((item, idx) => (
-                        <React.Fragment key={idx}>
+                        <React.Fragment key={item.label}>
                           <button
                             onClick={() => {
                               item.action();

@@ -243,13 +243,13 @@ export const AppShell: React.FC = () => {
   // state restored by HistoryEngine. From the user's perspective undo
   // appeared broken. The new code re-renders through the document model
   // so the canvas reflects the restored state.
-  const handleUndo = () => {
-    orchestrator.history.undo();
+  const handleUndo = async () => {
+    await orchestrator.history.undo();
     orchestrator.graphicsEngine.renderDocument();
   };
 
-  const handleRedo = () => {
-    orchestrator.history.redo();
+  const handleRedo = async () => {
+    await orchestrator.history.redo();
     orchestrator.graphicsEngine.renderDocument();
   };
 

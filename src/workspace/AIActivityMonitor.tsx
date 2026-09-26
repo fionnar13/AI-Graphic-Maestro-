@@ -155,7 +155,7 @@ export const AIActivityMonitor: React.FC<AIActivityMonitorProps> = ({
               { name: 'Color Harm', score: 8.8 },
               { name: 'Feathering', score: 9.2 },
             ].map((crit, idx) => (
-              <div key={idx} className="bg-[#090909] p-1.5 rounded border border-[#1c1c1c]">
+              <div key={crit.name} className="bg-[#090909] p-1.5 rounded border border-[#1c1c1c]">
                 <div className="flex justify-between text-[#888]">
                   <span>{crit.name}</span>
                   <span className="text-white font-medium">{crit.score}</span>

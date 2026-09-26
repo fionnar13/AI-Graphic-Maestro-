@@ -161,7 +161,7 @@ export const TestsTab: React.FC<TestsTabProps> = ({ initialResults }) => {
             <tbody className="divide-y divide-[#1e1e1e]">
               {filteredResults.map((test, index) => (
                 <tr
-                  key={index}
+                  key={`${index}-${test.name}`}
                   className="hover:bg-[#161616]/60 transition-colors"
                 >
                   <td className="p-3.5 pl-5">

@@ -389,7 +389,7 @@ export const MemoryExplorer: React.FC<MemoryExplorerProps> = ({
                       {isWorkflow && wfData && (
                         <div className="flex items-center gap-1.5 mt-2.5 flex-wrap">
                           {wfData.pipelineSequence.map((step, idx) => (
-                            <React.Fragment key={idx}>
+                            <React.Fragment key={step}>
                               <span className="px-2 py-0.5 rounded text-[10px] mono bg-[#18181b] border border-[#27272a] text-white">
                                 {step}
                               </span>
