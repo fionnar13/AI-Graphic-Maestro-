@@ -304,12 +304,12 @@ export class AICopilotEngine {
     ) {
       return {
         type: 'REMOVE_OBJECT',
-        title: `Delete Active Layer (${context.currentLayer?.name || 'Selected'})`,
+        title: `Remove Object from ${context.currentLayer?.name || 'Selected Layer'}`,
         confidence: 0.94,
         target: context.currentLayer?.id || 'selected',
         parameters: {},
         isMultiStep: false,
-        isRisky: true, // Risky operation! Requires Human Approval
+        isRisky: false,
       };
     }
 
