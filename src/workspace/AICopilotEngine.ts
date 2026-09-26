@@ -1084,12 +1084,35 @@ export class AICopilotEngine {
 
       // Phase 14.3.3 (A6) — Track real mutation. tool.evaluate is a no-op
       // evaluator that returns success without any document mutation.
-      // Any other tool that succeeds is considered a real mutation.
-      if (step.toolId !== 'tool.evaluate') {
+      // tool.rollback reverses a previous mutation (it's a state restoration,
+      // not a forward mutation). Any other tool that succeeds is considered
+      // a real mutation.
+      if (step.toolId !== 'tool.evaluate' && step.toolId !== 'tool.rollback') {
         documentMutated = true;
       }
 
-      if (engines.historyEngine) {
+      // Phase 14.3.3 (A8) — DO NOT call historyEngine.recordOperationDirectly()
+      // here. The tool already executed through GraphicsEngine.executeTool() →
+      // executePrimitiveToolCommand() → historyEngine.executeCommand(), which
+      // pushes a real undoable command onto the branch undo stack AND records
+      // the operation telemetry in the operations Map.
+      //
+      // Calling recordOperationDirectly() here used to ADD A SECOND operation
+      // record (parented to the command's record) which:
+      //   1. Created duplicate entries in the History panel timeline
+      //   2. Advanced branch.headOperationId past the command (so undo() on
+      //      the command would leave the orphan direct-record as head)
+      //   3. Diverged the "undoable command" stack from the "operation timeline"
+      //
+      // This was the parallel-history divergence (C1) root cause.
+      // The command record from executeCommand() IS the canonical history entry.
+      //
+      // For non-tool.* steps (vision.*, primitive.*) that don't go through
+      // GraphicsEngine.executeTool, we still want a telemetry record. We
+      // detect this by checking whether the toolId is a registered primitive
+      // tool in the GraphicsEngine (if so, executeCommand already recorded it).
+      const isGraphicsTool = step.toolId.startsWith('tool.');
+      if (engines.historyEngine && !isGraphicsTool) {
         const opRecord: OperationRecord = {
           operationId: `op_ai_${Date.now()}_${i}`,
           tool: step.toolId,
@@ -1108,8 +1131,8 @@ export class AICopilotEngine {
       // 7. Activity: Result Phase
       // Phase 14.3.3 (A6) — Accurate status message. Only say "Canvas &
       // Document updated" when a real mutation occurred. tool.evaluate and
-      // other no-op tools should not claim document mutation.
-      const isMutationStep = step.toolId !== 'tool.evaluate';
+      // tool.rollback should not claim forward document mutation.
+      const isMutationStep = step.toolId !== 'tool.evaluate' && step.toolId !== 'tool.rollback';
       onActivity?.({
         id: `act_${Date.now()}_res`,
         timestamp: Date.now(),

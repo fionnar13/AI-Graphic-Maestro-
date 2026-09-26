@@ -313,6 +313,34 @@ export class GraphicsEngine {
     this.notifySubscribers();
   }
 
+  /**
+   * Phase 14.3.3 (A7) — Removes a layer's pixel buffer from the map.
+   * Used by tool rollback paths to restore procedural-only rendering when
+   * a tool auto-created a buffer for a layer that previously had none.
+   *
+   * Without this, tools like RemoveObjectTool would:
+   *   1. Auto-create a gray buffer via getLayerPixelBuffer()
+   *   2. Clone that gray buffer as prevBuffer
+   *   3. On undo, setLayerPixelBuffer(prevBuffer) → still gray
+   *   4. Renderer overlays gray buffer → procedural content stays hidden
+   *
+   * Returns true if a buffer was deleted, false if none existed.
+   */
+  public deleteLayerPixelBuffer(layerId: string): boolean {
+    const existed = this.layerPixelBuffers.delete(layerId);
+    if (existed) this.notifySubscribers();
+    return existed;
+  }
+
+  /**
+   * Phase 14.3.3 (A7) — Returns true if a real pixel buffer exists for the
+   * layer (NOT auto-created). Tools should use this to detect whether they
+   * are operating on an existing buffer or creating one fresh.
+   */
+  public hasLayerPixelBuffer(layerId: string): boolean {
+    return this.layerPixelBuffers.has(layerId);
+  }
+
   public getActiveSelectionMask(): PixelBuffer | null {
     return this.activeSelectionMask;
   }
@@ -354,6 +382,8 @@ export class GraphicsEngine {
       setActiveSelectionMask: (mask: PixelBuffer | null) => self.setActiveSelectionMask(mask),
       getLayerPixelBuffer: (id: string) => self.getLayerPixelBuffer(id),
       setLayerPixelBuffer: (id: string, buf: PixelBuffer) => self.setLayerPixelBuffer(id, buf),
+      deleteLayerPixelBuffer: (id: string) => self.deleteLayerPixelBuffer(id),
+      hasLayerPixelBuffer: (id: string) => self.hasLayerPixelBuffer(id),
       createPixelBuffer: (w: number, h: number, fill?: [number, number, number, number]) =>
         PixelBuffer.create(w, h, fill),
     };

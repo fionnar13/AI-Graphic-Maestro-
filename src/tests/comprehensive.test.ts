@@ -28,6 +28,7 @@ import { ReasoningEngine } from '../reasoning/ReasoningEngine';
 import { Planner } from '../planner/Planner';
 import { Orchestrator } from '../orchestrator/Orchestrator';
 import { AICopilotEngine } from '../workspace/AICopilotEngine';
+import { PixelBuffer } from '../graphics/engine/PixelBuffer';
 import { DocumentTestSuite } from './document.test';
 import { MemoryTestSuite } from './memory.test';
 
@@ -717,7 +718,6 @@ export class ComprehensiveTestSuite {
         opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
       });
       // Create a pixel buffer manually (simulating a tool having run)
-      const { PixelBuffer } = require('../graphics/engine/PixelBuffer');
       const buf = PixelBuffer.create(100, 100, [255, 0, 0, 255]);
       graphics.setLayerPixelBuffer(layer.id, buf);
       // Render — should NOT destroy the pixel buffer
@@ -748,7 +748,6 @@ export class ComprehensiveTestSuite {
         bounds: { x: 100, y: 100, width: 200, height: 200 },
         opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
       });
-      const { PixelBuffer } = require('../graphics/engine/PixelBuffer');
       graphics.setLayerPixelBuffer(layer2.id, PixelBuffer.create(200, 200, [0, 255, 0, 255]));
       // Render
       graphics.renderDocument();
@@ -816,6 +815,221 @@ export class ComprehensiveTestSuite {
       graphics.executeTool('tool.move', { layerId: layer.id, dx: 30, dy: 0 });
       if (layer.bounds.x !== startX + 30) throw new Error(`Move failed: expected ${startX + 30}, got ${layer.bounds.x}`);
       if (layer.transform.position.x !== 0) throw new Error('transform.position should be 0');
+    }));
+
+    // =========================================================================
+    // Phase 14.3.3 (A7) — Rollback restores procedural-only rendering
+    // BUG: RemoveObjectTool and 7 other pixel tools auto-create a gray pixel
+    // buffer via getLayerPixelBuffer() for layers that previously had none.
+    // prevBuffer was a clone of that auto-created gray buffer, so rollback
+    // set gray → gray and the renderer kept overlaying the gray rectangle
+    // over the procedural content. User saw "undo does nothing".
+    // FIX: Track hadBufferBefore; rollback deletes the buffer if false.
+    // =========================================================================
+
+    // A7 — RemoveObject rollback deletes auto-created buffer (procedural restored)
+    results.push(await this.runTest('regression', 'A7: RemoveObject rollback deletes auto-created buffer (procedural restored)', async () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'Perfume Bottle Hero', type: 'raster',
+        bounds: { x: 320, y: 150, width: 160, height: 210 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      // Pre-condition: layer has NO pixel buffer
+      if ((graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('Pre-condition: layer should NOT have a pixel buffer');
+      }
+      // Execute RemoveObject via the AI Copilot path
+      const registry = new ToolRegistry();
+      const copilot = new AICopilotEngine(registry);
+      const ctx: any = { currentLayer: { id: layer.id, name: layer.name, bounds: layer.bounds } };
+      const intent = copilot.parseIntent('remove this object', ctx);
+      const plan = copilot.generatePlan(intent, ctx);
+      const res = await copilot.executePlan(plan, { documentEngine: doc, graphicsEngine: graphics, historyEngine: history, toolRegistry: registry });
+      if (!res.success) throw new Error('executePlan failed');
+      // Post-execute: layer SHOULD have a pixel buffer (auto-created by tool)
+      if (!(graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('Post-execute: layer should have auto-created pixel buffer');
+      }
+      // Undo
+      const undoOk = await history.undo();
+      if (!undoOk) throw new Error('Undo returned false');
+      // Post-undo: layer should NOT have a pixel buffer (deleted by rollback)
+      if ((graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('Post-undo: pixel buffer should be DELETED so procedural rendering is restored');
+      }
+    }));
+
+    // A7 — RemoveObject rollback preserves existing buffer (hadBufferBefore=true)
+    results.push(await this.runTest('regression', 'A7: RemoveObject rollback preserves existing buffer (hadBufferBefore=true)', async () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'Photo Layer', type: 'raster',
+        bounds: { x: 0, y: 0, width: 100, height: 100 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      // Pre-condition: layer HAS a real pixel buffer (e.g. imported photo)
+      const originalBuf = PixelBuffer.create(100, 100, [10, 20, 30, 255]);
+      graphics.setLayerPixelBuffer(layer.id, originalBuf);
+      // Execute RemoveObject
+      await graphics.executeTool('tool.remove_object', {
+        layerId: layer.id,
+        boundingBox: { x: 0, y: 0, width: 50, height: 50 },
+        coordinateSpace: 'layer',
+      });
+      // Post-execute: buffer still exists (modified in-place by inpaint)
+      if (!(graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('Post-execute: buffer should still exist');
+      }
+      // Undo
+      const undoOk = await history.undo();
+      if (!undoOk) throw new Error('Undo returned false');
+      // Post-undo: buffer should still exist (restored to prevBuffer, NOT deleted)
+      if (!(graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('Post-undo: buffer should still exist for hadBufferBefore=true');
+      }
+      // Verify content is restored to original
+      const restored = graphics.getLayerPixelBuffer(layer.id)!;
+      const px = restored.getPixel(0, 0);
+      if (px[0] !== 10 || px[1] !== 20 || px[2] !== 30) {
+        throw new Error(`Post-undo pixel not restored: expected [10,20,30], got [${px.slice(0,3)}]`);
+      }
+    }));
+
+    // A7 — BrightnessTool rollback deletes auto-created buffer
+    results.push(await this.runTest('regression', 'A7: BrightnessTool rollback deletes auto-created buffer', async () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'Hero', type: 'raster',
+        bounds: { x: 0, y: 0, width: 100, height: 100 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      // Layer has NO pixel buffer initially
+      if ((graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('Pre: layer should not have buffer');
+      }
+      // Execute BrightnessTool
+      await graphics.executeTool('tool.brightness', { layerId: layer.id, brightness: 50 });
+      if (!(graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('Post-execute: buffer should exist');
+      }
+      // Undo
+      const undoOk = await history.undo();
+      if (!undoOk) throw new Error('Undo returned false');
+      // Post-undo: buffer should be DELETED
+      if ((graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('Post-undo: buffer should be DELETED for hadBufferBefore=false');
+      }
+    }));
+
+    // =========================================================================
+    // Phase 14.3.3 (A8) — No parallel history divergence
+    // BUG: executePlan called historyEngine.recordOperationDirectly() AFTER
+    // the tool had already gone through historyEngine.executeCommand() (via
+    // ToolRegistry → GraphicsEngine.executeTool → executePrimitiveToolCommand).
+    // This created TWO operation records for ONE tool execution, with the
+    // direct-record parented to the command record. The timeline showed 2
+    // entries, undo only popped the command (leaving the orphan direct-record
+    // as branch head). This was the C1 parallel-history divergence.
+    // FIX: Only call recordOperationDirectly for non-tool.* steps (vision.*,
+    // primitive.*) that don't go through GraphicsEngine.executeTool.
+    // =========================================================================
+
+    // A8 — executePlan on tool.* creates exactly ONE history entry
+    results.push(await this.runTest('regression', 'A8: executePlan on tool.remove_object creates exactly ONE history entry', async () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'Perfume Bottle Hero', type: 'raster',
+        bounds: { x: 320, y: 150, width: 160, height: 210 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      const registry = new ToolRegistry();
+      const copilot = new AICopilotEngine(registry);
+      const ctx: any = { currentLayer: { id: layer.id, name: layer.name, bounds: layer.bounds } };
+      const intent = copilot.parseIntent('remove this object', ctx);
+      const plan = copilot.generatePlan(intent, ctx);
+      const beforeOps = history.getAllOperations().length;
+      const beforeUndoStack = (history as any).branchUndoStacks.get('branch_main').length;
+      await copilot.executePlan(plan, { documentEngine: doc, graphicsEngine: graphics, historyEngine: history, toolRegistry: registry });
+      const afterOps = history.getAllOperations().length;
+      const afterUndoStack = (history as any).branchUndoStacks.get('branch_main').length;
+      const opsAdded = afterOps - beforeOps;
+      const undoAdded = afterUndoStack - beforeUndoStack;
+      // Should add EXACTLY 1 operation record (from executeCommand), NOT 2
+      if (opsAdded !== 1) {
+        throw new Error(`Expected 1 operation added, got ${opsAdded}. Parallel history divergence detected.`);
+      }
+      // Should add EXACTLY 1 undoable command
+      if (undoAdded !== 1) {
+        throw new Error(`Expected 1 undo command added, got ${undoAdded}`);
+      }
+    }));
+
+    // A8 — executePlan on vision.* creates a direct record (no executeCommand path)
+    results.push(await this.runTest('regression', 'A8: executePlan on vision.* creates a direct record (non-tool path)', async () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const registry = new ToolRegistry();
+      const copilot = new AICopilotEngine(registry);
+      // REMOVE_BACKGROUND plan uses vision.subject_detection as step 1
+      const ctx: any = { currentLayer: { id: 'layer1', name: 'Hero', bounds: { x: 0, y: 0, width: 100, height: 100 } } };
+      const intent = copilot.parseIntent('remove background', ctx);
+      const plan = copilot.generatePlan(intent, ctx);
+      const beforeOps = history.getAllOperations().length;
+      // Execute — vision.* steps should still record directly
+      await copilot.executePlan(plan, { documentEngine: doc, graphicsEngine: graphics, historyEngine: history, toolRegistry: registry });
+      const afterOps = history.getAllOperations().length;
+      // Should have added at least 1 operation for the vision.* step
+      if (afterOps - beforeOps < 1) {
+        throw new Error(`Expected at least 1 vision.* operation, got ${afterOps - beforeOps}`);
+      }
+    }));
+
+    // A6 — tool.rollback does not report "Canvas & Document updated"
+    results.push(await this.runTest('regression', 'A6: tool.rollback step does not claim forward mutation', async () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'Hero', type: 'raster',
+        bounds: { x: 100, y: 100, width: 50, height: 50 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      const registry = new ToolRegistry();
+      const copilot = new AICopilotEngine(registry);
+      // First do a real mutation (move) so undo has something to undo
+      await graphics.executeTool('tool.move', { layerId: layer.id, dx: 10, dy: 0 });
+      // Now execute a rollback plan
+      const ctx: any = { currentLayer: { id: layer.id, name: layer.name, bounds: layer.bounds } };
+      const intent = copilot.parseIntent('undo', ctx);
+      const plan = copilot.generatePlan(intent, ctx);
+      const events: any[] = [];
+      const res = await copilot.executePlan(plan, { documentEngine: doc, graphicsEngine: graphics, historyEngine: history, toolRegistry: registry }, (e) => events.push(e));
+      if (!res.success) throw new Error('rollback plan failed');
+      // plan.status should be completed_noop (no forward mutation)
+      if (plan.status !== 'completed_noop') {
+        throw new Error(`Expected plan.status=completed_noop, got ${plan.status}`);
+      }
+      // No event should claim "Canvas & Document updated" for the rollback step
+      const updatedEvents = events.filter(e => e.summary && e.summary.includes('Canvas & Document updated'));
+      if (updatedEvents.length > 0) {
+        throw new Error('tool.rollback should NOT emit "Canvas & Document updated": ' + JSON.stringify(updatedEvents));
+      }
     }));
 
     return results;

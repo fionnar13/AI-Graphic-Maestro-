@@ -67,6 +67,13 @@ export class RemoveObjectTool implements IGraphicsTool {
       };
     }
 
+    // Phase 14.3.3 (A7) — Track whether the layer had a REAL pixel buffer
+    // before this tool ran. If getLayerPixelBuffer() auto-creates a gray
+    // buffer for a layer that previously had none, rollback must DELETE
+    // the buffer (not restore to the auto-created gray clone) so the
+    // renderer returns to procedural-only rendering.
+    const hadBufferBefore = context.hasLayerPixelBuffer(layer.id);
+
     let buffer = context.getLayerPixelBuffer(layer.id);
     if (!buffer) {
       buffer = context.createPixelBuffer(layer.bounds.width, layer.bounds.height, [220, 220, 220, 255]);
@@ -105,6 +112,11 @@ export class RemoveObjectTool implements IGraphicsTool {
       rollbackData: {
         layerId: layer.id,
         prevBuffer,
+        // Phase 14.3.3 (A7) — Remember whether the layer had a real buffer
+        // before. If not, rollback must DELETE the buffer (not restore to
+        // the auto-created gray clone), so the renderer returns to
+        // procedural-only rendering and the user sees the original content.
+        hadBufferBefore,
       },
       output: {
         removed: true,
@@ -114,6 +126,15 @@ export class RemoveObjectTool implements IGraphicsTool {
   }
 
   public rollback(context: ToolExecutionContext, rollbackData: any): boolean {
+    // Phase 14.3.3 (A7) — If the layer had NO pixel buffer before the tool
+    // ran, the buffer was auto-created by getLayerPixelBuffer(). Restoring
+    // to prevBuffer (a clone of that auto-created gray buffer) would leave
+    // a gray rectangle on the canvas. Instead, DELETE the buffer so the
+    // renderer returns to procedural-only rendering.
+    if (rollbackData.hadBufferBefore === false) {
+      context.deleteLayerPixelBuffer(rollbackData.layerId);
+      return true;
+    }
     context.setLayerPixelBuffer(rollbackData.layerId, rollbackData.prevBuffer);
     return true;
   }

@@ -21,6 +21,19 @@ export interface ToolExecutionContext {
   setActiveSelectionMask: (mask: PixelBuffer | null) => void;
   getLayerPixelBuffer: (layerId: string) => PixelBuffer | null;
   setLayerPixelBuffer: (layerId: string, buffer: PixelBuffer) => void;
+  /**
+   * Phase 14.3.3 (A7) — Permanently removes the layer's pixel buffer.
+   * Used by tool rollback to restore procedural-only rendering when a tool
+   * auto-created a buffer for a layer that previously had none.
+   * Returns true if a buffer was deleted.
+   */
+  deleteLayerPixelBuffer: (layerId: string) => boolean;
+  /**
+   * Phase 14.3.3 (A7) — Returns true if the layer has a real (non-auto-created)
+   * pixel buffer. Tools should call this BEFORE getLayerPixelBuffer() to detect
+   * whether they are modifying existing pixels or creating a fresh buffer.
+   */
+  hasLayerPixelBuffer: (layerId: string) => boolean;
   createPixelBuffer: (width: number, height: number, fillColor?: [number, number, number, number]) => PixelBuffer;
 }
 

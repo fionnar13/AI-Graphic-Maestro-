@@ -48,6 +48,8 @@ export class RecolorTool implements IGraphicsTool {
     if (!validation.valid) throw new Error(`Validation failed: ${validation.errors?.join(', ')}`);
 
     const layer = context.documentEngine.getLayer(params.layerId)!;
+    // Phase 14.3.3 (A7) — Track real-buffer state for proper rollback.
+    const hadBufferBefore = context.hasLayerPixelBuffer(layer.id);
     let buffer = context.getLayerPixelBuffer(layer.id);
     if (!buffer) {
       // Initialize a default buffer if not present
@@ -106,12 +108,18 @@ export class RecolorTool implements IGraphicsTool {
       rollbackData: {
         layerId: layer.id,
         prevBuffer,
+        hadBufferBefore,
       },
       output: { modifiedPixels },
     };
   }
 
   public rollback(context: ToolExecutionContext, rollbackData: any): boolean {
+    // Phase 14.3.3 (A7) — If layer had no buffer before, DELETE the auto-created buffer.
+    if (rollbackData.hadBufferBefore === false) {
+      context.deleteLayerPixelBuffer(rollbackData.layerId);
+      return true;
+    }
     context.setLayerPixelBuffer(rollbackData.layerId, rollbackData.prevBuffer);
     return true;
   }
