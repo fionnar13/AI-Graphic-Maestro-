@@ -41,17 +41,13 @@ export class ScaleTool implements IGraphicsTool {
     if (!validation.valid) throw new Error(`Validation failed: ${validation.errors?.join(', ')}`);
 
     const layer = context.documentEngine.getLayer(params.layerId)!;
-    const prevScale = { ...layer.transform.scale };
     const prevBounds = { ...layer.bounds };
 
-    const newScaleX = layer.transform.scale.x * params.scaleX;
-    const newScaleY = layer.transform.scale.y * params.scaleY;
-
-    context.documentEngine.setTransform(layer.id, {
-      scale: { x: newScaleX, y: newScaleY },
-    });
-
-    // Update bounds
+    // Phase 14.3.3 (A4) — Only write bounds.width/height, NOT transform.scale.
+    // The renderer multiplies bounds.width × transform.scale.x, so writing both
+    // causes quadratic scaling (sx²). The manual canvas-drag path already
+    // follows this contract — it writes only bounds and leaves transform.scale
+    // at identity {1,1}.
     const newW = Math.round(prevBounds.width * params.scaleX);
     const newH = Math.round(prevBounds.height * params.scaleY);
     context.documentEngine.setBounds(layer.id, {
@@ -66,20 +62,16 @@ export class ScaleTool implements IGraphicsTool {
       affectedLayerIds: [layer.id],
       rollbackData: {
         layerId: layer.id,
-        prevScale,
         prevBounds,
       },
       output: {
-        scale: { x: newScaleX, y: newScaleY },
+        scale: { x: 1, y: 1 },
         bounds: layer.bounds,
       },
     };
   }
 
   public rollback(context: ToolExecutionContext, rollbackData: any): boolean {
-    context.documentEngine.setTransform(rollbackData.layerId, {
-      scale: rollbackData.prevScale,
-    });
     context.documentEngine.setBounds(rollbackData.layerId, rollbackData.prevBounds);
     return true;
   }

@@ -62,20 +62,22 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
   const canRedo = historyEngine ? historyEngine.canRedo() : (graphicsEngine ? graphicsEngine.canRedo() : false);
 
   const handleUndo = async () => {
-    if (graphicsEngine) {
-      await graphicsEngine.rollback();
-    } else if (historyEngine) {
+    if (historyEngine) {
       await historyEngine.undo();
+    } else if (graphicsEngine) {
+      await graphicsEngine.rollback();
     }
+    if (graphicsEngine) graphicsEngine.renderDocument();
     if (onLayerUpdate) onLayerUpdate();
   };
 
   const handleRedo = async () => {
-    if (graphicsEngine) {
-      await graphicsEngine.redo();
-    } else if (historyEngine) {
+    if (historyEngine) {
       await historyEngine.redo();
+    } else if (graphicsEngine) {
+      await graphicsEngine.redo();
     }
+    if (graphicsEngine) graphicsEngine.renderDocument();
     if (onLayerUpdate) onLayerUpdate();
   };
 
@@ -201,7 +203,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
             ) : (
               historySnapshots.map((snap) => (
                 <div
-                  key={snap.iteration}
+                  key={`${snap.iteration}-${snap.timestamp}`}
                   className="p-2 rounded-lg bg-[#141414] border border-[#242424] flex flex-col justify-between gap-1.5"
                 >
                   <div className="flex items-center justify-between">

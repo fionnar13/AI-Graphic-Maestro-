@@ -48,6 +48,11 @@ export class GraphicsToolCommand extends BaseCommand {
     }
 
     this.rollbackData = result.rollbackData;
+    // Phase 14.3.3 (A5) — Explicitly render after AI tool mutation.
+    // The manual path (DocumentMutationCommand) already calls renderDocument()
+    // in doExecute/doUndo. The AI path (GraphicsToolCommand) previously relied
+    // only on notifySubscribers(), which does NOT guarantee a canvas re-render.
+    this.graphicsEngine.renderDocument();
     this.graphicsEngine.notifySubscribers();
 
     return {
@@ -75,6 +80,8 @@ export class GraphicsToolCommand extends BaseCommand {
     const context = (this.graphicsEngine as any).buildExecutionContext();
     const success = await tool.rollback(context, this.rollbackData);
     if (success) {
+      // Phase 14.3.3 (A5) — Explicitly render after AI tool undo.
+      this.graphicsEngine.renderDocument();
       this.graphicsEngine.notifySubscribers();
     }
     return success;

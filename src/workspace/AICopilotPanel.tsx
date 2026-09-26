@@ -182,6 +182,20 @@ export const AICopilotPanel: React.FC<AICopilotPanelProps> = ({
     setMessages((prev) =>
       prev.map((msg) => {
         if (msg.id === msgId) {
+          // Phase 14.3.3 (A6 final) — Respect plan.status when composing the
+          // user-facing summary. When the plan executed successfully but no
+          // real document mutation occurred (plan.status === 'completed_noop',
+          // e.g. tool.evaluate for an open-ended directive like
+          // "make design futuristic"), the message must NOT claim
+          // "Successfully executed N step(s) on Document & Canvas" — that
+          // violates the A6 acceptance contract. Real mutations
+          // (plan.status === 'completed') keep the existing message.
+          const isNoop = plan.status === 'completed_noop';
+          const changesSummary = !result.success
+            ? `Execution error: ${result.error}`
+            : isNoop
+              ? `Analysis complete — no document changes required (${durationMs}ms).`
+              : `Successfully executed ${result.executedSteps} step(s) on Document & Canvas in ${durationMs}ms.`;
           return {
             ...msg,
             plan: { ...plan },
@@ -190,9 +204,7 @@ export const AICopilotPanel: React.FC<AICopilotPanelProps> = ({
               toolId: plan.steps[0]?.toolId || 'tool.unknown',
               durationMs,
               affectedLayer: plan.intent.target,
-              changesSummary: result.success
-                ? `Successfully executed ${result.executedSteps} step(s) on Document & Canvas in ${durationMs}ms.`
-                : `Execution error: ${result.error}`,
+              changesSummary,
               error: result.error,
             },
           };
@@ -226,9 +238,8 @@ export const AICopilotPanel: React.FC<AICopilotPanelProps> = ({
 
   const handleRollbackStep = async () => {
     if (!historyEngine || !graphicsEngine) return;
-    const canUndo = historyEngine.canUndo();
-    if (canUndo) {
-      await historyEngine.undo();
+    const undoSuccess = await historyEngine.undo();
+    if (undoSuccess) {
       graphicsEngine.renderDocument();
       onLayerUpdate?.();
 
@@ -324,7 +335,7 @@ export const AICopilotPanel: React.FC<AICopilotPanelProps> = ({
         <div className="flex flex-wrap gap-1">
           {TEST_SUGGESTIONS.map((item, idx) => (
             <button
-              key={idx}
+              key={item.label}
               onClick={() => handleSendPrompt(item.prompt)}
               disabled={isProcessing}
               className="text-left px-2 py-1 rounded-md bg-[#181818] hover:bg-[#252525] border border-[#292929] text-[10px] text-[#ccc] hover:text-white transition-colors cursor-pointer disabled:opacity-50"

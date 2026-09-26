@@ -126,6 +126,13 @@ export class GraphicsEngine {
     // historyEngine.setGraphicsEngine(graphicsEngine) to complete wiring.
     this.historyEngine = historyEngine;
 
+    // Phase 14.3.3 (A2 hotfix) — Sync document canvas dimensions to match
+    // GraphicsEngine dimensions. Without this, renderDocument() resizes the
+    // canvas to the document's default dimensions (1920x1080 from
+    // DocumentEngine metadata) while layers are at 800x500 coordinates,
+    // leaving 80%+ of the canvas transparent.
+    this.documentEngine.setCanvasDimensions(width, height);
+
     this.workerDispatcher = WorkerDispatcher.getInstance();
     this.registerAllPrimitiveTools();
     this.ensureDefaultLayers();
@@ -306,6 +313,34 @@ export class GraphicsEngine {
     this.notifySubscribers();
   }
 
+  /**
+   * Phase 14.3.3 (A7) — Removes a layer's pixel buffer from the map.
+   * Used by tool rollback paths to restore procedural-only rendering when
+   * a tool auto-created a buffer for a layer that previously had none.
+   *
+   * Without this, tools like RemoveObjectTool would:
+   *   1. Auto-create a gray buffer via getLayerPixelBuffer()
+   *   2. Clone that gray buffer as prevBuffer
+   *   3. On undo, setLayerPixelBuffer(prevBuffer) → still gray
+   *   4. Renderer overlays gray buffer → procedural content stays hidden
+   *
+   * Returns true if a buffer was deleted, false if none existed.
+   */
+  public deleteLayerPixelBuffer(layerId: string): boolean {
+    const existed = this.layerPixelBuffers.delete(layerId);
+    if (existed) this.notifySubscribers();
+    return existed;
+  }
+
+  /**
+   * Phase 14.3.3 (A7) — Returns true if a real pixel buffer exists for the
+   * layer (NOT auto-created). Tools should use this to detect whether they
+   * are operating on an existing buffer or creating one fresh.
+   */
+  public hasLayerPixelBuffer(layerId: string): boolean {
+    return this.layerPixelBuffers.has(layerId);
+  }
+
   public getActiveSelectionMask(): PixelBuffer | null {
     return this.activeSelectionMask;
   }
@@ -347,6 +382,8 @@ export class GraphicsEngine {
       setActiveSelectionMask: (mask: PixelBuffer | null) => self.setActiveSelectionMask(mask),
       getLayerPixelBuffer: (id: string) => self.getLayerPixelBuffer(id),
       setLayerPixelBuffer: (id: string, buf: PixelBuffer) => self.setLayerPixelBuffer(id, buf),
+      deleteLayerPixelBuffer: (id: string) => self.deleteLayerPixelBuffer(id),
+      hasLayerPixelBuffer: (id: string) => self.hasLayerPixelBuffer(id),
       createPixelBuffer: (w: number, h: number, fill?: [number, number, number, number]) =>
         PixelBuffer.create(w, h, fill),
     };
@@ -735,7 +772,13 @@ export class GraphicsEngine {
         }
       }
 
-      // Render content based on kind
+      // === PROCEDURAL RENDERING PHASE ===
+      // Phase 14.3.3 (A2 hotfix) — Procedural rendering is INDEPENDENT of
+      // pixel-buffer existence. A layer may have valid procedural content
+      // (text, vector, raster name-based dispatch) without having a pixel
+      // buffer. This block always executes regardless of pixel-buffer state.
+      // The pixel-buffer overlay (below) is a SEPARATE phase that runs AFTER
+      // procedural rendering and only if a buffer exists.
       if (layer.content) {
         if (layer.content.kind === 'text') {
           const tc = layer.content as TextContent;
@@ -858,6 +901,7 @@ export class GraphicsEngine {
         }
       }
 
+      // === PIXEL BUFFER OVERLAY PHASE ===
       // Phase 14.3.2 (Fix 5, T5) — Blit the layer's pixel buffer OVER the
       // layer's vector/text/raster content. Per Q4-sub: pixel buffer renders
       // OVER content (destructive-edit semantics for BrightnessTool etc.).
@@ -869,7 +913,10 @@ export class GraphicsEngine {
       // (translate/rotate/scale) correctly. The transform is already set
       // on ctx from the layer rendering above, so drawImage at (0, 0, w, h)
       // in the layer's local coordinate space applies the transform.
-      const pixelBuffer = this.getLayerPixelBuffer(layer.id);
+      // Phase 14.3.3 (A2) — Use direct map access instead of getLayerPixelBuffer()
+      // to avoid auto-creating opaque gray buffers for layers without pixel data.
+      // The renderer must be observational: blit existing buffers, skip missing ones.
+      const pixelBuffer = this.layerPixelBuffers.get(layer.id);
       if (pixelBuffer && typeof document !== 'undefined' && typeof document.createElement === 'function') {
         const offscreen = document.createElement('canvas');
         offscreen.width = pixelBuffer.width;

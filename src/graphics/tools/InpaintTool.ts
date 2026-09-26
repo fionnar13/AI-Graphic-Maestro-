@@ -50,6 +50,8 @@ export class InpaintTool implements IGraphicsTool {
     if (!validation.valid) throw new Error(`Validation failed: ${validation.errors?.join(', ')}`);
 
     const layer = context.documentEngine.getLayer(params.layerId)!;
+    // Phase 14.3.3 (A7) — Track real-buffer state for proper rollback.
+    const hadBufferBefore = context.hasLayerPixelBuffer(layer.id);
     let buffer = context.getLayerPixelBuffer(layer.id);
     if (!buffer) {
       buffer = context.createPixelBuffer(layer.bounds.width, layer.bounds.height, [220, 220, 220, 255]);
@@ -101,6 +103,7 @@ export class InpaintTool implements IGraphicsTool {
       rollbackData: {
         layerId: layer.id,
         prevBuffer,
+        hadBufferBefore,
       },
       output: {
         inpainted: true,
@@ -109,6 +112,11 @@ export class InpaintTool implements IGraphicsTool {
   }
 
   public rollback(context: ToolExecutionContext, rollbackData: any): boolean {
+    // Phase 14.3.3 (A7) — If layer had no buffer before, DELETE the auto-created buffer.
+    if (rollbackData.hadBufferBefore === false) {
+      context.deleteLayerPixelBuffer(rollbackData.layerId);
+      return true;
+    }
     context.setLayerPixelBuffer(rollbackData.layerId, rollbackData.prevBuffer);
     return true;
   }

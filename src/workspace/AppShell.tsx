@@ -134,9 +134,17 @@ export const AppShell: React.FC = () => {
     recolorBlend,
   ]);
 
+  // Phase 14.3.3 (A2 hotfix) — On mount, call renderDocument() instead of
+  // renderCanvasComposition(). The old mount path called renderCanvasComposition()
+  // which draws only 3 hardcoded procedural elements (background + shadow + subject)
+  // via direct canvas methods — it does NOT render the 5 document layers.
+  // Before A2, getLayerPixelBuffer() auto-created gray buffers that were blitted
+  // by renderDocument (called earlier by CanvasWorkspace), making layers visible
+  // as gray rectangles. After A2, no gray buffers are created, so the only way
+  // to see document layers is to call renderDocument() as the final render.
   useEffect(() => {
-    renderCanvasComposition();
-  }, [renderCanvasComposition]);
+    orchestrator.graphicsEngine.renderDocument();
+  }, [orchestrator.graphicsEngine]);
 
   // Run comprehensive tests on mount
   useEffect(() => {
@@ -235,13 +243,13 @@ export const AppShell: React.FC = () => {
   // state restored by HistoryEngine. From the user's perspective undo
   // appeared broken. The new code re-renders through the document model
   // so the canvas reflects the restored state.
-  const handleUndo = () => {
-    orchestrator.history.undo();
+  const handleUndo = async () => {
+    await orchestrator.history.undo();
     orchestrator.graphicsEngine.renderDocument();
   };
 
-  const handleRedo = () => {
-    orchestrator.history.redo();
+  const handleRedo = async () => {
+    await orchestrator.history.redo();
     orchestrator.graphicsEngine.renderDocument();
   };
 

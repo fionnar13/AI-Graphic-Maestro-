@@ -469,7 +469,7 @@ export const GraphicsTab: React.FC<GraphicsTabProps> = ({ graphicsEngine }) => {
                   <div className="text-xs text-[#666] py-3 text-center">Awaiting tool execution...</div>
                 ) : (
                   executionLog.map((line, idx) => (
-                    <div key={idx} className="p-1 rounded bg-[#161616] truncate">
+                    <div key={`${idx}-${line.substring(0, 20)}`} className="p-1 rounded bg-[#161616] truncate">
                       {line}
                     </div>
                   ))

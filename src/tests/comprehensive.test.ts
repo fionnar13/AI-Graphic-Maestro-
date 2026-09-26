@@ -27,6 +27,8 @@ import { VisionEngine } from '../vision/VisionEngine';
 import { ReasoningEngine } from '../reasoning/ReasoningEngine';
 import { Planner } from '../planner/Planner';
 import { Orchestrator } from '../orchestrator/Orchestrator';
+import { AICopilotEngine } from '../workspace/AICopilotEngine';
+import { PixelBuffer } from '../graphics/engine/PixelBuffer';
 import { DocumentTestSuite } from './document.test';
 import { MemoryTestSuite } from './memory.test';
 
@@ -468,6 +470,676 @@ export class ComprehensiveTestSuite {
       const result = tools.validate('system.eval_arbitrary_code', { code: 'alert(1)' });
       if (result.valid) {
         throw new Error('Security violation: Arbitrary code execution not blocked by ToolRegistry!');
+      }
+    }));
+
+    // =========================================================================
+    // Phase 14.3.3 — Regression Tests
+    // =========================================================================
+
+    // A1 — Pixel tool AI wiring: intent parsing
+    results.push(await this.runTest('regression', 'Regression: AI parses brightness intent (A1)', () => {
+      const tools = new ToolRegistry();
+      const copilot = new AICopilotEngine(tools);
+      const ctx: any = { currentLayer: { id: 'l1', name: 'Test', bounds: { x: 0, y: 0, width: 100, height: 100 } } };
+      const intent = copilot.parseIntent('increase brightness by 50', ctx);
+      if (intent.type !== 'ADJUST_BRIGHTNESS') throw new Error(`Expected ADJUST_BRIGHTNESS, got ${intent.type}`);
+      if (intent.parameters.brightness !== 50) throw new Error(`Expected brightness=50, got ${intent.parameters.brightness}`);
+    }));
+
+    results.push(await this.runTest('regression', 'Regression: AI parses contrast intent (A1)', () => {
+      const tools = new ToolRegistry();
+      const copilot = new AICopilotEngine(tools);
+      const ctx: any = { currentLayer: { id: 'l1', name: 'Test', bounds: { x: 0, y: 0, width: 100, height: 100 } } };
+      const intent = copilot.parseIntent('contrast 40', ctx);
+      if (intent.type !== 'ADJUST_CONTRAST') throw new Error(`Expected ADJUST_CONTRAST, got ${intent.type}`);
+    }));
+
+    results.push(await this.runTest('regression', 'Regression: AI parses inpaint intent (A1)', () => {
+      const tools = new ToolRegistry();
+      const copilot = new AICopilotEngine(tools);
+      const ctx: any = { currentLayer: { id: 'l1', name: 'Test', bounds: { x: 0, y: 0, width: 100, height: 100 } } };
+      const intent = copilot.parseIntent('inpaint the region', ctx);
+      if (intent.type !== 'INPAINT_REGION') throw new Error(`Expected INPAINT_REGION, got ${intent.type}`);
+    }));
+
+    results.push(await this.runTest('regression', 'Regression: AI parses crop intent (A1)', () => {
+      const tools = new ToolRegistry();
+      const copilot = new AICopilotEngine(tools);
+      const ctx: any = { currentLayer: { id: 'l1', name: 'Test', bounds: { x: 0, y: 0, width: 100, height: 100 } } };
+      const intent = copilot.parseIntent('crop 400 300', ctx);
+      if (intent.type !== 'CROP_DOCUMENT') throw new Error(`Expected CROP_DOCUMENT, got ${intent.type}`);
+    }));
+
+    // A1 — Pixel tool AI wiring: plan generation
+    results.push(await this.runTest('regression', 'Regression: AI generates brightness plan with tool.brightness (A1)', () => {
+      const tools = new ToolRegistry();
+      const copilot = new AICopilotEngine(tools);
+      const ctx: any = { currentLayer: { id: 'l1', name: 'Test', bounds: { x: 0, y: 0, width: 100, height: 100 } } };
+      const intent = copilot.parseIntent('increase brightness by 50', ctx);
+      const plan = copilot.generatePlan(intent, ctx);
+      if (plan.steps.length !== 1) throw new Error(`Expected 1 step, got ${plan.steps.length}`);
+      if (plan.steps[0].toolId !== 'tool.brightness') throw new Error(`Expected tool.brightness, got ${plan.steps[0].toolId}`);
+      if (plan.steps[0].parameters.brightness !== 50) throw new Error(`Expected brightness=50, got ${plan.steps[0].parameters.brightness}`);
+    }));
+
+    // A1 — RemoveObject includes boundingBox (not whole-layer delete)
+    results.push(await this.runTest('regression', 'Regression: RemoveObject plan includes boundingBox (A1)', () => {
+      const tools = new ToolRegistry();
+      const copilot = new AICopilotEngine(tools);
+      const ctx: any = { currentLayer: { id: 'l1', name: 'Test', bounds: { x: 10, y: 20, width: 100, height: 80 } } };
+      const intent = copilot.parseIntent('remove object', ctx);
+      const plan = copilot.generatePlan(intent, ctx);
+      if (plan.steps[0].toolId !== 'tool.remove_object') throw new Error(`Expected tool.remove_object`);
+      if (!plan.steps[0].parameters.boundingBox) throw new Error('RemoveObject plan missing boundingBox — would trigger whole-layer delete');
+      if (plan.steps[0].parameters.coordinateSpace !== 'canvas') throw new Error('Expected coordinateSpace=canvas');
+    }));
+
+    // A3 — MoveTool single-apply (transform.position stays at identity)
+    results.push(await this.runTest('regression', 'Regression: AI move does not write transform.position (A3)', () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'MoveTest', type: 'raster',
+        bounds: { x: 100, y: 100, width: 50, height: 50 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      const startX = layer.bounds.x;
+      graphics.executeTool('tool.move', { layerId: layer.id, dx: 50, dy: 0 });
+      if (layer.bounds.x !== startX + 50) throw new Error(`Expected bounds.x=${startX + 50}, got ${layer.bounds.x}`);
+      if (layer.transform.position.x !== 0) throw new Error(`transform.position.x should be 0, got ${layer.transform.position.x}`);
+    }));
+
+    // A4 — ScaleTool single-apply (transform.scale stays at identity)
+    results.push(await this.runTest('regression', 'Regression: AI scale does not write transform.scale (A4)', () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'ScaleTest', type: 'raster',
+        bounds: { x: 100, y: 100, width: 100, height: 100 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      const startW = layer.bounds.width;
+      graphics.executeTool('tool.scale', { layerId: layer.id, scaleX: 1.5, scaleY: 1.5 });
+      if (layer.bounds.width !== Math.round(startW * 1.5)) throw new Error(`Expected width=${Math.round(startW * 1.5)}, got ${layer.bounds.width}`);
+      if (layer.transform.scale.x !== 1) throw new Error(`transform.scale.x should be 1, got ${layer.transform.scale.x}`);
+    }));
+
+    // A4 — Repeated scale does not compound
+    results.push(await this.runTest('regression', 'Regression: Repeated AI scale does not compound (A4)', () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'RepeatScaleTest', type: 'raster',
+        bounds: { x: 100, y: 100, width: 100, height: 100 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      graphics.executeTool('tool.scale', { layerId: layer.id, scaleX: 2, scaleY: 2 });
+      const w1 = layer.bounds.width;
+      graphics.executeTool('tool.scale', { layerId: layer.id, scaleX: 2, scaleY: 2 });
+      const w2 = layer.bounds.width;
+      // Each scale should double: 100 → 200 → 400 (NOT 100 → 200 → 800)
+      if (w2 !== w1 * 2) throw new Error(`Repeated scale compounded: ${w1} → ${w2} (expected ${w1 * 2})`);
+      if (layer.transform.scale.x !== 1) throw new Error(`transform.scale.x should still be 1 after repeated scale`);
+    }));
+
+    // A6 — Unknown intent does not report completed
+    results.push(await this.runTest('regression', 'Regression: Unknown intent produces completed_noop, not completed (A6)', () => {
+      const tools = new ToolRegistry();
+      const copilot = new AICopilotEngine(tools);
+      const ctx: any = { currentLayer: null };
+      const intent = copilot.parseIntent('xyzzy frobnicate', ctx);
+      if (intent.type !== 'UNKNOWN') throw new Error(`Expected UNKNOWN, got ${intent.type}`);
+      const plan = copilot.generatePlan(intent, ctx);
+      // The default case produces tool.evaluate — a no-op
+      if (plan.steps[0].toolId !== 'tool.evaluate') throw new Error(`Expected tool.evaluate for UNKNOWN, got ${plan.steps[0].toolId}`);
+    }));
+
+    // A2 — Renderer does not auto-create pixel buffers
+    results.push(await this.runTest('regression', 'Regression: renderDocument does not auto-create pixel buffers (A2)', () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'NoBufTest', type: 'raster',
+        bounds: { x: 0, y: 0, width: 100, height: 100 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      // renderDocument should NOT create a pixel buffer for this layer
+      graphics.renderDocument();
+      const buf = (graphics as any).layerPixelBuffers.get(layer.id);
+      if (buf) throw new Error('renderDocument auto-created a pixel buffer — renderer must be observational');
+    }));
+
+    // CropTool hotfix — canvas-crop does not write transform.position
+    results.push(await this.runTest('regression', 'Regression: Canvas crop does not write transform.position (CropTool hotfix)', () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'CropTest', type: 'raster',
+        bounds: { x: 100, y: 100, width: 200, height: 150 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      const startBoundsX = layer.bounds.x;
+      const startBoundsY = layer.bounds.y;
+
+      graphics.executeTool('tool.crop', {
+        target: 'canvas', layerId: layer.id,
+        x: 50, y: 50, width: 400, height: 300,
+      });
+
+      // bounds should shift by exactly -50, -50 (single apply)
+      if (layer.bounds.x !== startBoundsX - 50) throw new Error(`Expected bounds.x=${startBoundsX - 50}, got ${layer.bounds.x}`);
+      if (layer.bounds.y !== startBoundsY - 50) throw new Error(`Expected bounds.y=${startBoundsY - 50}, got ${layer.bounds.y}`);
+      // transform.position must remain at identity
+      if (layer.transform.position.x !== 0) throw new Error(`transform.position.x should be 0, got ${layer.transform.position.x}`);
+      if (layer.transform.position.y !== 0) throw new Error(`transform.position.y should be 0, got ${layer.transform.position.y}`);
+    }));
+
+    // CropTool hotfix — undo/redo preserves single-apply
+    results.push(await this.runTest('regression', 'Regression: Crop undo/redo preserves transform.position identity (CropTool hotfix)', async () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'CropUndoTest', type: 'raster',
+        bounds: { x: 200, y: 150, width: 100, height: 100 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      const origX = layer.bounds.x;
+      const origY = layer.bounds.y;
+
+      // Execute crop
+      await graphics.executePrimitiveToolCommand('tool.crop', {
+        target: 'canvas', layerId: layer.id,
+        x: 50, y: 50, width: 500, height: 400,
+      });
+      if (layer.transform.position.x !== 0) throw new Error(`transform.position.x should be 0 after crop, got ${layer.transform.position.x}`);
+
+      // Undo
+      await history.undo();
+      if (layer.bounds.x !== origX) throw new Error(`Undo should restore bounds.x=${origX}, got ${layer.bounds.x}`);
+      if (layer.transform.position.x !== 0) throw new Error(`transform.position.x should be 0 after undo, got ${layer.transform.position.x}`);
+
+      // Redo
+      await history.redo();
+      if (layer.bounds.x !== origX - 50) throw new Error(`Redo should restore bounds.x=${origX - 50}, got ${layer.bounds.x}`);
+      if (layer.transform.position.x !== 0) throw new Error(`transform.position.x should be 0 after redo, got ${layer.transform.position.x}`);
+    }));
+
+    // =========================================================================
+    // Phase 14.3.3 A2 Hotfix — Renderer Independence Regression Tests
+    // =========================================================================
+
+    // Test A — Procedural layer without pixel buffer renders correctly
+    results.push(await this.runTest('regression', 'A2-Hotfix A: Procedural layer without pixel buffer renders (no gray overlay)', () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'Studio Backdrop', type: 'raster',
+        bounds: { x: 0, y: 0, width: 800, height: 500 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      // Ensure no pixel buffer exists before render
+      if ((graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('Pre-condition: pixel buffer should not exist');
+      }
+      // Render — should NOT auto-create a pixel buffer
+      graphics.renderDocument();
+      // After render, still no pixel buffer (renderer is observational)
+      if ((graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('A2 regression: renderDocument auto-created a pixel buffer');
+      }
+      // Layer is still visible
+      if (!layer.visible) throw new Error('Layer should be visible');
+    }));
+
+    // Test B — Layer with pixel buffer: procedural content + buffer both render
+    results.push(await this.runTest('regression', 'A2-Hotfix B: Layer with pixel buffer — procedural + buffer coexist', () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'Test Layer', type: 'raster',
+        bounds: { x: 0, y: 0, width: 100, height: 100 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      // Create a pixel buffer manually (simulating a tool having run)
+      const buf = PixelBuffer.create(100, 100, [255, 0, 0, 255]);
+      graphics.setLayerPixelBuffer(layer.id, buf);
+      // Render — should NOT destroy the pixel buffer
+      graphics.renderDocument();
+      // Pixel buffer should still exist
+      if (!(graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('Pixel buffer was removed during render');
+      }
+      // Layer is still visible
+      if (!layer.visible) throw new Error('Layer should be visible');
+    }));
+
+    // Test C — Procedural + pixel buffer: neither suppresses the other
+    results.push(await this.runTest('regression', 'A2-Hotfix C: Procedural + pixel buffer — neither suppresses the other', () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      // Layer 1: procedural only (no pixel buffer)
+      const layer1 = doc.createLayer({
+        name: 'Studio Backdrop', type: 'raster',
+        bounds: { x: 0, y: 0, width: 800, height: 500 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      // Layer 2: has pixel buffer
+      const layer2 = doc.createLayer({
+        name: 'Bottle', type: 'raster',
+        bounds: { x: 100, y: 100, width: 200, height: 200 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      graphics.setLayerPixelBuffer(layer2.id, PixelBuffer.create(200, 200, [0, 255, 0, 255]));
+      // Render
+      graphics.renderDocument();
+      // Layer 1 should NOT have a pixel buffer (procedural only)
+      if ((graphics as any).layerPixelBuffers.has(layer1.id)) {
+        throw new Error('Layer1 should not have pixel buffer after render');
+      }
+      // Layer 2 should still have its pixel buffer
+      if (!(graphics as any).layerPixelBuffers.has(layer2.id)) {
+        throw new Error('Layer2 pixel buffer was removed during render');
+      }
+      // Both layers still visible
+      if (!layer1.visible || !layer2.visible) throw new Error('Both layers should be visible');
+    }));
+
+    // Test D — Missing pixel buffer does not mutate state
+    results.push(await this.runTest('regression', 'A2-Hotfix D: Rendering does not create pixel buffers (state integrity)', () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      // Create 3 layers with different content types
+      doc.createLayer({
+        name: 'Backdrop', type: 'raster',
+        bounds: { x: 0, y: 0, width: 800, height: 500 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      doc.createLayer({
+        name: 'Title', type: 'text',
+        bounds: { x: 100, y: 50, width: 300, height: 40 },
+        opacity: 1, blendMode: 'normal',
+        content: { kind: 'text', text: 'HELLO', fontSize: 24, fontFamily: 'Inter', color: '#ffffff', align: 'center' },
+      });
+      doc.createLayer({
+        name: 'Box', type: 'vector',
+        bounds: { x: 200, y: 200, width: 100, height: 100 },
+        opacity: 1, blendMode: 'normal',
+        content: { kind: 'vector', fillColor: '#7c3aed', cornerRadius: 8 },
+      });
+      // Count pixel buffers before render
+      const beforeCount = (graphics as any).layerPixelBuffers.size;
+      // Render multiple times
+      graphics.renderDocument();
+      graphics.renderDocument();
+      graphics.renderDocument();
+      // Count after — must be unchanged
+      const afterCount = (graphics as any).layerPixelBuffers.size;
+      if (afterCount !== beforeCount) {
+        throw new Error(`Pixel buffer count changed: ${beforeCount} → ${afterCount} (rendering must not create state)`);
+      }
+    }));
+
+    // Test E — Existing Phase 14.3.3 behavior intact (move single-apply after render)
+    results.push(await this.runTest('regression', 'A2-Hotfix E: Move single-apply intact after render fix', () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'MoveRender', type: 'raster',
+        bounds: { x: 100, y: 100, width: 50, height: 50 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      const startX = layer.bounds.x;
+      graphics.executeTool('tool.move', { layerId: layer.id, dx: 30, dy: 0 });
+      if (layer.bounds.x !== startX + 30) throw new Error(`Move failed: expected ${startX + 30}, got ${layer.bounds.x}`);
+      if (layer.transform.position.x !== 0) throw new Error('transform.position should be 0');
+    }));
+
+    // =========================================================================
+    // Phase 14.3.3 (A7) — Rollback restores procedural-only rendering
+    // BUG: RemoveObjectTool and 7 other pixel tools auto-create a gray pixel
+    // buffer via getLayerPixelBuffer() for layers that previously had none.
+    // prevBuffer was a clone of that auto-created gray buffer, so rollback
+    // set gray → gray and the renderer kept overlaying the gray rectangle
+    // over the procedural content. User saw "undo does nothing".
+    // FIX: Track hadBufferBefore; rollback deletes the buffer if false.
+    // =========================================================================
+
+    // A7 — RemoveObject rollback deletes auto-created buffer (procedural restored)
+    results.push(await this.runTest('regression', 'A7: RemoveObject rollback deletes auto-created buffer (procedural restored)', async () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'Perfume Bottle Hero', type: 'raster',
+        bounds: { x: 320, y: 150, width: 160, height: 210 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      // Pre-condition: layer has NO pixel buffer
+      if ((graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('Pre-condition: layer should NOT have a pixel buffer');
+      }
+      // Execute RemoveObject via the AI Copilot path
+      const registry = new ToolRegistry();
+      const copilot = new AICopilotEngine(registry);
+      const ctx: any = { currentLayer: { id: layer.id, name: layer.name, bounds: layer.bounds } };
+      const intent = copilot.parseIntent('remove this object', ctx);
+      const plan = copilot.generatePlan(intent, ctx);
+      const res = await copilot.executePlan(plan, { documentEngine: doc, graphicsEngine: graphics, historyEngine: history, toolRegistry: registry });
+      if (!res.success) throw new Error('executePlan failed');
+      // Post-execute: layer SHOULD have a pixel buffer (auto-created by tool)
+      if (!(graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('Post-execute: layer should have auto-created pixel buffer');
+      }
+      // Undo
+      const undoOk = await history.undo();
+      if (!undoOk) throw new Error('Undo returned false');
+      // Post-undo: layer should NOT have a pixel buffer (deleted by rollback)
+      if ((graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('Post-undo: pixel buffer should be DELETED so procedural rendering is restored');
+      }
+    }));
+
+    // A7 — RemoveObject rollback preserves existing buffer (hadBufferBefore=true)
+    results.push(await this.runTest('regression', 'A7: RemoveObject rollback preserves existing buffer (hadBufferBefore=true)', async () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'Photo Layer', type: 'raster',
+        bounds: { x: 0, y: 0, width: 100, height: 100 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      // Pre-condition: layer HAS a real pixel buffer (e.g. imported photo)
+      const originalBuf = PixelBuffer.create(100, 100, [10, 20, 30, 255]);
+      graphics.setLayerPixelBuffer(layer.id, originalBuf);
+      // Execute RemoveObject
+      await graphics.executeTool('tool.remove_object', {
+        layerId: layer.id,
+        boundingBox: { x: 0, y: 0, width: 50, height: 50 },
+        coordinateSpace: 'layer',
+      });
+      // Post-execute: buffer still exists (modified in-place by inpaint)
+      if (!(graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('Post-execute: buffer should still exist');
+      }
+      // Undo
+      const undoOk = await history.undo();
+      if (!undoOk) throw new Error('Undo returned false');
+      // Post-undo: buffer should still exist (restored to prevBuffer, NOT deleted)
+      if (!(graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('Post-undo: buffer should still exist for hadBufferBefore=true');
+      }
+      // Verify content is restored to original
+      const restored = graphics.getLayerPixelBuffer(layer.id)!;
+      const px = restored.getPixel(0, 0);
+      if (px[0] !== 10 || px[1] !== 20 || px[2] !== 30) {
+        throw new Error(`Post-undo pixel not restored: expected [10,20,30], got [${px.slice(0,3)}]`);
+      }
+    }));
+
+    // A7 — BrightnessTool rollback deletes auto-created buffer
+    results.push(await this.runTest('regression', 'A7: BrightnessTool rollback deletes auto-created buffer', async () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'Hero', type: 'raster',
+        bounds: { x: 0, y: 0, width: 100, height: 100 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      // Layer has NO pixel buffer initially
+      if ((graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('Pre: layer should not have buffer');
+      }
+      // Execute BrightnessTool
+      await graphics.executeTool('tool.brightness', { layerId: layer.id, brightness: 50 });
+      if (!(graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('Post-execute: buffer should exist');
+      }
+      // Undo
+      const undoOk = await history.undo();
+      if (!undoOk) throw new Error('Undo returned false');
+      // Post-undo: buffer should be DELETED
+      if ((graphics as any).layerPixelBuffers.has(layer.id)) {
+        throw new Error('Post-undo: buffer should be DELETED for hadBufferBefore=false');
+      }
+    }));
+
+    // =========================================================================
+    // Phase 14.3.3 (A8) — No parallel history divergence
+    // BUG: executePlan called historyEngine.recordOperationDirectly() AFTER
+    // the tool had already gone through historyEngine.executeCommand() (via
+    // ToolRegistry → GraphicsEngine.executeTool → executePrimitiveToolCommand).
+    // This created TWO operation records for ONE tool execution, with the
+    // direct-record parented to the command record. The timeline showed 2
+    // entries, undo only popped the command (leaving the orphan direct-record
+    // as branch head). This was the C1 parallel-history divergence.
+    // FIX: Only call recordOperationDirectly for non-tool.* steps (vision.*,
+    // primitive.*) that don't go through GraphicsEngine.executeTool.
+    // =========================================================================
+
+    // A8 — executePlan on tool.* creates exactly ONE history entry
+    results.push(await this.runTest('regression', 'A8: executePlan on tool.remove_object creates exactly ONE history entry', async () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'Perfume Bottle Hero', type: 'raster',
+        bounds: { x: 320, y: 150, width: 160, height: 210 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      const registry = new ToolRegistry();
+      const copilot = new AICopilotEngine(registry);
+      const ctx: any = { currentLayer: { id: layer.id, name: layer.name, bounds: layer.bounds } };
+      const intent = copilot.parseIntent('remove this object', ctx);
+      const plan = copilot.generatePlan(intent, ctx);
+      const beforeOps = history.getAllOperations().length;
+      const beforeUndoStack = (history as any).branchUndoStacks.get('branch_main').length;
+      await copilot.executePlan(plan, { documentEngine: doc, graphicsEngine: graphics, historyEngine: history, toolRegistry: registry });
+      const afterOps = history.getAllOperations().length;
+      const afterUndoStack = (history as any).branchUndoStacks.get('branch_main').length;
+      const opsAdded = afterOps - beforeOps;
+      const undoAdded = afterUndoStack - beforeUndoStack;
+      // Should add EXACTLY 1 operation record (from executeCommand), NOT 2
+      if (opsAdded !== 1) {
+        throw new Error(`Expected 1 operation added, got ${opsAdded}. Parallel history divergence detected.`);
+      }
+      // Should add EXACTLY 1 undoable command
+      if (undoAdded !== 1) {
+        throw new Error(`Expected 1 undo command added, got ${undoAdded}`);
+      }
+    }));
+
+    // A8 — executePlan on vision.* creates a direct record (no executeCommand path)
+    results.push(await this.runTest('regression', 'A8: executePlan on vision.* creates a direct record (non-tool path)', async () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const registry = new ToolRegistry();
+      const copilot = new AICopilotEngine(registry);
+      // REMOVE_BACKGROUND plan uses vision.subject_detection as step 1
+      const ctx: any = { currentLayer: { id: 'layer1', name: 'Hero', bounds: { x: 0, y: 0, width: 100, height: 100 } } };
+      const intent = copilot.parseIntent('remove background', ctx);
+      const plan = copilot.generatePlan(intent, ctx);
+      const beforeOps = history.getAllOperations().length;
+      // Execute — vision.* steps should still record directly
+      await copilot.executePlan(plan, { documentEngine: doc, graphicsEngine: graphics, historyEngine: history, toolRegistry: registry });
+      const afterOps = history.getAllOperations().length;
+      // Should have added at least 1 operation for the vision.* step
+      if (afterOps - beforeOps < 1) {
+        throw new Error(`Expected at least 1 vision.* operation, got ${afterOps - beforeOps}`);
+      }
+    }));
+
+    // A6 — tool.rollback does not report "Canvas & Document updated"
+    results.push(await this.runTest('regression', 'A6: tool.rollback step does not claim forward mutation', async () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'Hero', type: 'raster',
+        bounds: { x: 100, y: 100, width: 50, height: 50 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      const registry = new ToolRegistry();
+      const copilot = new AICopilotEngine(registry);
+      // First do a real mutation (move) so undo has something to undo
+      await graphics.executeTool('tool.move', { layerId: layer.id, dx: 10, dy: 0 });
+      // Now execute a rollback plan
+      const ctx: any = { currentLayer: { id: layer.id, name: layer.name, bounds: layer.bounds } };
+      const intent = copilot.parseIntent('undo', ctx);
+      const plan = copilot.generatePlan(intent, ctx);
+      const events: any[] = [];
+      const res = await copilot.executePlan(plan, { documentEngine: doc, graphicsEngine: graphics, historyEngine: history, toolRegistry: registry }, (e) => events.push(e));
+      if (!res.success) throw new Error('rollback plan failed');
+      // plan.status should be completed_noop (no forward mutation)
+      if (plan.status !== 'completed_noop') {
+        throw new Error(`Expected plan.status=completed_noop, got ${plan.status}`);
+      }
+      // No event should claim "Canvas & Document updated" for the rollback step
+      const updatedEvents = events.filter(e => e.summary && e.summary.includes('Canvas & Document updated'));
+      if (updatedEvents.length > 0) {
+        throw new Error('tool.rollback should NOT emit "Canvas & Document updated": ' + JSON.stringify(updatedEvents));
+      }
+    }));
+
+    // A6 (final) — "make design futuristic" routes to tool.evaluate and
+    // produces plan.status='completed_noop' with no false mutation message.
+    // This is the exact A6 acceptance contract: an open-ended directive that
+    // does not match any concrete mutation intent must NOT be reported as
+    // "Successfully executed" / "Canvas & Document updated".
+    results.push(await this.runTest('regression', 'A6 final: "make design futuristic" → completed_noop, no false mutation message', async () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'Perfume Bottle Hero', type: 'raster',
+        bounds: { x: 320, y: 150, width: 160, height: 210 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      graphics.setActiveLayer(layer.id);
+      const registry = new ToolRegistry();
+      const copilot = new AICopilotEngine(registry);
+      const ctx = copilot.buildContextSnapshot(doc, graphics, layer.id);
+      const intent = copilot.parseIntent('make design futuristic', ctx);
+      // Open-ended directives (UNKNOWN intent) fall through to the default
+      // plan which uses tool.evaluate — a non-mutating evaluator. The exact
+      // intent.type is not asserted; only the final A6 contract matters:
+      //   1. plan.steps[0].toolId === 'tool.evaluate' (non-mutating)
+      //   2. plan.status === 'completed_noop' after execution
+      //   3. No activity event claims "Canvas & Document updated"
+      //   4. No undoable command pushed onto the undo stack
+      void intent; // consumed by generatePlan below
+      const plan = copilot.generatePlan(intent, ctx);
+      if (plan.steps.length === 0) throw new Error('Plan has no steps');
+      const stepToolId = plan.steps[0].toolId;
+      if (stepToolId !== 'tool.evaluate') {
+        throw new Error(`Expected step toolId='tool.evaluate', got '${stepToolId}'`);
+      }
+      // Execute and capture activity events
+      const events: any[] = [];
+      const res = await copilot.executePlan(
+        plan,
+        { documentEngine: doc, graphicsEngine: graphics, historyEngine: history, toolRegistry: registry },
+        (e) => events.push(e),
+      );
+      if (!res.success) throw new Error(`executePlan failed: ${res.error}`);
+      // A6 acceptance contract:
+      //   1. plan.status === 'completed_noop' (no document mutation)
+      if (plan.status !== 'completed_noop') {
+        throw new Error(`Expected plan.status='completed_noop', got '${plan.status}'`);
+      }
+      //   2. No activity event claims "Canvas & Document updated"
+      const falseMutationEvents = events.filter(
+        e => e.summary && e.summary.includes('Canvas & Document updated'),
+      );
+      if (falseMutationEvents.length > 0) {
+        throw new Error(
+          'False mutation message emitted for tool.evaluate: ' +
+          JSON.stringify(falseMutationEvents.map(e => e.summary)),
+        );
+      }
+      //   3. document mutation = false: no undoable command should have been
+      //      pushed onto the branch undo stack by this plan.
+      const undoStack = (history as any).branchUndoStacks.get('branch_main') as any[];
+      if (undoStack && undoStack.length > 0) {
+        throw new Error(
+          `Expected zero undoable commands for completed_noop plan, got ${undoStack.length}`,
+        );
+      }
+    }));
+
+    // A6 (final) — Real mutation still produces plan.status='completed'.
+    // Guards against over-correcting A6 (e.g. accidentally classifying all
+    // successful executions as no-ops).
+    results.push(await this.runTest('regression', 'A6 final: real mutation (move) → completed, mutation message emitted', async () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'Hero', type: 'raster',
+        bounds: { x: 100, y: 100, width: 50, height: 50 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      graphics.setActiveLayer(layer.id);
+      const registry = new ToolRegistry();
+      const copilot = new AICopilotEngine(registry);
+      const ctx = copilot.buildContextSnapshot(doc, graphics, layer.id);
+      const intent = copilot.parseIntent('move 50 pixels right', ctx);
+      const plan = copilot.generatePlan(intent, ctx);
+      const events: any[] = [];
+      const res = await copilot.executePlan(
+        plan,
+        { documentEngine: doc, graphicsEngine: graphics, historyEngine: history, toolRegistry: registry },
+        (e) => events.push(e),
+      );
+      if (!res.success) throw new Error(`executePlan failed: ${res.error}`);
+      // Real mutation contract:
+      //   1. plan.status === 'completed' (NOT completed_noop)
+      //   2. At least one activity event says "Canvas & Document updated"
+      if (plan.status !== 'completed') {
+        throw new Error(`Expected plan.status='completed' for real mutation, got '${plan.status}'`);
+      }
+      const mutationEvents = events.filter(
+        e => e.summary && e.summary.includes('Canvas & Document updated'),
+      );
+      if (mutationEvents.length === 0) {
+        throw new Error('Expected at least one "Canvas & Document updated" event for real mutation');
+      }
+      // Layer must have actually moved
+      if (layer.bounds.x !== 150) {
+        throw new Error(`Layer did not move: expected x=150, got x=${layer.bounds.x}`);
       }
     }));
 

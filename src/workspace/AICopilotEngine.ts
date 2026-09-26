@@ -304,12 +304,12 @@ export class AICopilotEngine {
     ) {
       return {
         type: 'REMOVE_OBJECT',
-        title: `Delete Active Layer (${context.currentLayer?.name || 'Selected'})`,
+        title: `Remove Object from ${context.currentLayer?.name || 'Selected Layer'}`,
         confidence: 0.94,
         target: context.currentLayer?.id || 'selected',
         parameters: {},
         isMultiStep: false,
-        isRisky: true, // Risky operation! Requires Human Approval
+        isRisky: false,
       };
     }
 
@@ -362,6 +362,89 @@ export class AICopilotEngine {
         parameters: {},
         isMultiStep: false,
         isRisky: false,
+      };
+    }
+
+    // Phase 14.3.3 (A1) — Pixel tool intent mappings
+    // Brightness
+    if (p.includes('brightness') || p.includes('brighten') || p.includes('darken') ||
+        p.includes('روشن') || p.includes('تاریک') || p.includes('روشنی')) {
+      let brightness = 50;
+      const numMatch = p.match(/(-?\d+)/);
+      if (numMatch) brightness = Math.max(-100, Math.min(100, parseInt(numMatch[1])));
+      if (p.includes('darken') || p.includes('تاریک')) brightness = -Math.abs(brightness);
+      return {
+        type: 'ADJUST_BRIGHTNESS', title: 'Adjust Brightness', confidence: 0.92,
+        parameters: { brightness }, isMultiStep: false, isRisky: false,
+      };
+    }
+    // Contrast
+    if (p.includes('contrast') || p.includes('کنتراست')) {
+      let contrast = 30;
+      const numMatch = p.match(/(-?\d+)/);
+      if (numMatch) contrast = Math.max(-100, Math.min(100, parseInt(numMatch[1])));
+      return {
+        type: 'ADJUST_CONTRAST', title: 'Adjust Contrast', confidence: 0.92,
+        parameters: { contrast }, isMultiStep: false, isRisky: false,
+      };
+    }
+    // Curves
+    if (p.includes('curve') || p.includes('منحنی')) {
+      return {
+        type: 'ADJUST_CURVES', title: 'Adjust Curves', confidence: 0.88,
+        parameters: { controlPoints: [[0, 0], [64, 50], [192, 210], [255, 255]], channel: 'rgb' },
+        isMultiStep: false, isRisky: false,
+      };
+    }
+    // Levels
+    if (p.includes('level') || p.includes('سطوح')) {
+      return {
+        type: 'ADJUST_LEVELS', title: 'Adjust Levels', confidence: 0.88,
+        parameters: { inputBlack: 10, inputWhite: 245, gamma: 1.2, outputBlack: 0, outputWhite: 255 },
+        isMultiStep: false, isRisky: false,
+      };
+    }
+    // Inpaint
+    if (p.includes('inpaint') || p.includes('ترمیم') || p.includes('fill hole') || p.includes('restore')) {
+      return {
+        type: 'INPAINT_REGION', title: 'Inpaint Region', confidence: 0.88,
+        parameters: { radius: 4 }, isMultiStep: false, isRisky: false,
+      };
+    }
+    // Clone
+    if (p.includes('clone') || p.includes('کلون') || p.includes('stamp')) {
+      return {
+        type: 'CLONE_STAMP', title: 'Clone Stamp', confidence: 0.88,
+        parameters: { sourceX: 10, sourceY: 10, targetX: 30, targetY: 30, radius: 20, hardness: 0.8, opacity: 1.0 },
+        isMultiStep: false, isRisky: false,
+      };
+    }
+    // Heal
+    if (p.includes('heal') || p.includes('درمان') || p.includes('patch') || p.includes('repair')) {
+      return {
+        type: 'HEAL_PATCH', title: 'Heal Patch', confidence: 0.88,
+        parameters: { sourceX: 10, sourceY: 10, targetX: 30, targetY: 30, radius: 15 },
+        isMultiStep: false, isRisky: false,
+      };
+    }
+    // Composite
+    if (p.includes('composite') || p.includes('merge') || p.includes('ترکیب') || p.includes('blend layers')) {
+      return {
+        type: 'COMPOSITE_STUDIO', title: 'Composite Layers', confidence: 0.88,
+        parameters: { blendMode: 'normal', opacity: 1.0 }, isMultiStep: false, isRisky: false,
+      };
+    }
+    // Crop
+    if (p.includes('crop') || p.includes('برش')) {
+      let cx = 0, cy = 0, cw = 400, ch = 300;
+      const nums = p.match(/(-?\d+)/g);
+      if (nums && nums.length >= 2) {
+        cw = parseInt(nums[0]); ch = parseInt(nums[1]);
+      }
+      return {
+        type: 'CROP_DOCUMENT', title: 'Crop Document', confidence: 0.88,
+        parameters: { target: 'canvas', x: cx, y: cy, width: cw, height: ch },
+        isMultiStep: false, isRisky: false,
       };
     }
 
@@ -471,14 +554,21 @@ export class AICopilotEngine {
         break;
 
       case 'REMOVE_OBJECT':
+        // Phase 14.3.3 (A1) — Include boundingBox so RemoveObjectTool inpaints
+        // the region instead of deleting the whole layer. Without boundingBox,
+        // the tool falls through to documentEngine.deleteLayer() which is
+        // destructive and bypasses the inpaint algorithm.
         steps = [
           {
             id: `${planId}_step_1`,
             order: 1,
-            title: `Delete Target Layer (${targetLayerName}) from Document`,
+            title: `Remove Object from Layer (${targetLayerName}) via Inpainting`,
             toolId: 'tool.remove_object',
             parameters: {
               layerId: targetLayerId,
+              boundingBox: context.currentLayer?.bounds || { x: 0, y: 0, width: 100, height: 100 },
+              dilateRadius: 2,
+              coordinateSpace: 'canvas',
             },
             status: 'pending',
           },
@@ -624,6 +714,158 @@ export class AICopilotEngine {
         ];
         break;
 
+      // Phase 14.3.3 (A1) — Pixel tool plan cases
+      case 'ADJUST_BRIGHTNESS':
+        steps = [
+          {
+            id: `${planId}_step_1`, order: 1,
+            title: `Adjust Brightness (${intent.parameters.brightness}) on ${targetLayerName}`,
+            toolId: 'tool.brightness',
+            parameters: { layerId: targetLayerId, brightness: intent.parameters.brightness },
+            status: 'pending',
+          },
+        ];
+        break;
+
+      case 'ADJUST_CONTRAST':
+        steps = [
+          {
+            id: `${planId}_step_1`, order: 1,
+            title: `Adjust Contrast (${intent.parameters.contrast}) on ${targetLayerName}`,
+            toolId: 'tool.contrast',
+            parameters: { layerId: targetLayerId, contrast: intent.parameters.contrast },
+            status: 'pending',
+          },
+        ];
+        break;
+
+      case 'ADJUST_CURVES':
+        steps = [
+          {
+            id: `${planId}_step_1`, order: 1,
+            title: `Adjust Curves on ${targetLayerName}`,
+            toolId: 'tool.curves',
+            parameters: {
+              layerId: targetLayerId,
+              channel: intent.parameters.channel || 'rgb',
+              controlPoints: intent.parameters.controlPoints,
+            },
+            status: 'pending',
+          },
+        ];
+        break;
+
+      case 'ADJUST_LEVELS':
+        steps = [
+          {
+            id: `${planId}_step_1`, order: 1,
+            title: `Adjust Levels on ${targetLayerName}`,
+            toolId: 'tool.levels',
+            parameters: {
+              layerId: targetLayerId,
+              inputBlack: intent.parameters.inputBlack ?? 0,
+              inputWhite: intent.parameters.inputWhite ?? 255,
+              gamma: intent.parameters.gamma ?? 1.0,
+              outputBlack: intent.parameters.outputBlack ?? 0,
+              outputWhite: intent.parameters.outputWhite ?? 255,
+            },
+            status: 'pending',
+          },
+        ];
+        break;
+
+      case 'INPAINT_REGION':
+        steps = [
+          {
+            id: `${planId}_step_1`, order: 1,
+            title: `Inpaint Region on ${targetLayerName}`,
+            toolId: 'tool.inpaint',
+            parameters: {
+              layerId: targetLayerId,
+              maskRegion: context.currentLayer?.bounds || { x: 0, y: 0, width: 50, height: 50 },
+              radius: intent.parameters.radius || 4,
+            },
+            status: 'pending',
+          },
+        ];
+        break;
+
+      case 'CLONE_STAMP':
+        steps = [
+          {
+            id: `${planId}_step_1`, order: 1,
+            title: `Clone Stamp on ${targetLayerName}`,
+            toolId: 'tool.clone',
+            parameters: {
+              layerId: targetLayerId,
+              sourceX: intent.parameters.sourceX,
+              sourceY: intent.parameters.sourceY,
+              targetX: intent.parameters.targetX,
+              targetY: intent.parameters.targetY,
+              radius: intent.parameters.radius,
+              hardness: intent.parameters.hardness ?? 0.8,
+              opacity: intent.parameters.opacity ?? 1.0,
+            },
+            status: 'pending',
+          },
+        ];
+        break;
+
+      case 'HEAL_PATCH':
+        steps = [
+          {
+            id: `${planId}_step_1`, order: 1,
+            title: `Heal Patch on ${targetLayerName}`,
+            toolId: 'tool.heal',
+            parameters: {
+              layerId: targetLayerId,
+              sourceX: intent.parameters.sourceX,
+              sourceY: intent.parameters.sourceY,
+              targetX: intent.parameters.targetX,
+              targetY: intent.parameters.targetY,
+              radius: intent.parameters.radius,
+            },
+            status: 'pending',
+          },
+        ];
+        break;
+
+      case 'COMPOSITE_STUDIO':
+        steps = [
+          {
+            id: `${planId}_step_1`, order: 1,
+            title: `Composite Layers`,
+            toolId: 'tool.composite',
+            parameters: {
+              sourceLayerId: targetLayerId,
+              destLayerId: targetLayerId,
+              blendMode: intent.parameters.blendMode || 'normal',
+              opacity: intent.parameters.opacity ?? 1.0,
+            },
+            status: 'pending',
+          },
+        ];
+        break;
+
+      case 'CROP_DOCUMENT':
+        steps = [
+          {
+            id: `${planId}_step_1`, order: 1,
+            title: `Crop Document`,
+            toolId: 'tool.crop',
+            parameters: {
+              target: intent.parameters.target || 'canvas',
+              layerId: targetLayerId,
+              x: intent.parameters.x ?? 0,
+              y: intent.parameters.y ?? 0,
+              width: intent.parameters.width ?? 400,
+              height: intent.parameters.height ?? 300,
+            },
+            status: 'pending',
+          },
+        ];
+        break;
+
       default:
         steps = [
           {
@@ -705,6 +947,11 @@ export class AICopilotEngine {
     const reg = engines.toolRegistry || this.toolRegistry;
     plan.status = 'executing';
     let executedCount = 0;
+    // Phase 14.3.3 (A6) — Track whether any real document mutation occurred.
+    // tool.evaluate is a no-op evaluator that returns success without mutation.
+    // The plan should NOT report "COMPLETED" with "Canvas & Document updated"
+    // when no actual mutation happened.
+    let documentMutated = false;
 
     for (let i = 0; i < plan.steps.length; i++) {
       const step = plan.steps[i];
@@ -835,7 +1082,37 @@ export class AICopilotEngine {
       step.output = res.output;
       executedCount++;
 
-      if (engines.historyEngine) {
+      // Phase 14.3.3 (A6) — Track real mutation. tool.evaluate is a no-op
+      // evaluator that returns success without any document mutation.
+      // tool.rollback reverses a previous mutation (it's a state restoration,
+      // not a forward mutation). Any other tool that succeeds is considered
+      // a real mutation.
+      if (step.toolId !== 'tool.evaluate' && step.toolId !== 'tool.rollback') {
+        documentMutated = true;
+      }
+
+      // Phase 14.3.3 (A8) — DO NOT call historyEngine.recordOperationDirectly()
+      // here. The tool already executed through GraphicsEngine.executeTool() →
+      // executePrimitiveToolCommand() → historyEngine.executeCommand(), which
+      // pushes a real undoable command onto the branch undo stack AND records
+      // the operation telemetry in the operations Map.
+      //
+      // Calling recordOperationDirectly() here used to ADD A SECOND operation
+      // record (parented to the command's record) which:
+      //   1. Created duplicate entries in the History panel timeline
+      //   2. Advanced branch.headOperationId past the command (so undo() on
+      //      the command would leave the orphan direct-record as head)
+      //   3. Diverged the "undoable command" stack from the "operation timeline"
+      //
+      // This was the parallel-history divergence (C1) root cause.
+      // The command record from executeCommand() IS the canonical history entry.
+      //
+      // For non-tool.* steps (vision.*, primitive.*) that don't go through
+      // GraphicsEngine.executeTool, we still want a telemetry record. We
+      // detect this by checking whether the toolId is a registered primitive
+      // tool in the GraphicsEngine (if so, executeCommand already recorded it).
+      const isGraphicsTool = step.toolId.startsWith('tool.');
+      if (engines.historyEngine && !isGraphicsTool) {
         const opRecord: OperationRecord = {
           operationId: `op_ai_${Date.now()}_${i}`,
           tool: step.toolId,
@@ -852,18 +1129,27 @@ export class AICopilotEngine {
       }
 
       // 7. Activity: Result Phase
+      // Phase 14.3.3 (A6) — Accurate status message. Only say "Canvas &
+      // Document updated" when a real mutation occurred. tool.evaluate and
+      // tool.rollback should not claim forward document mutation.
+      const isMutationStep = step.toolId !== 'tool.evaluate' && step.toolId !== 'tool.rollback';
       onActivity?.({
         id: `act_${Date.now()}_res`,
         timestamp: Date.now(),
         phase: 'Result',
         toolId: step.toolId,
-        summary: `Success (${res.durationMs}ms): Canvas & Document updated`,
+        summary: isMutationStep
+          ? `Success (${res.durationMs}ms): Canvas & Document updated`
+          : `Success (${res.durationMs}ms): Evaluated — no document changes`,
         status: 'success',
         durationMs: res.durationMs,
       });
     }
 
-    plan.status = 'completed';
+    // Phase 14.3.3 (A6) — Plan status reflects actual mutation.
+    // 'completed' = at least one step mutated the document.
+    // 'completed_noop' = all steps were no-ops (e.g., tool.evaluate).
+    plan.status = documentMutated ? 'completed' : 'completed_noop';
     plan.completedAt = Date.now();
 
     return {

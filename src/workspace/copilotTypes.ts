@@ -19,6 +19,13 @@ export type CopilotIntentType =
   | 'APPLY_TEXTURE'
   | 'COMPOSITE_STUDIO'
   | 'CROP_DOCUMENT'
+  | 'ADJUST_BRIGHTNESS'
+  | 'ADJUST_CONTRAST'
+  | 'ADJUST_CURVES'
+  | 'ADJUST_LEVELS'
+  | 'INPAINT_REGION'
+  | 'CLONE_STAMP'
+  | 'HEAL_PATCH'
   | 'EVALUATE'
   | 'ROLLBACK'
   | 'UNKNOWN';
@@ -52,7 +59,7 @@ export interface CopilotPlan {
   intent: CopilotIntent;
   title: string;
   isRisky: boolean;
-  status: 'awaiting_approval' | 'executing' | 'completed' | 'failed' | 'cancelled';
+  status: 'awaiting_approval' | 'executing' | 'completed' | 'completed_noop' | 'failed' | 'cancelled';
   steps: CopilotPlanStep[];
   createdAt: number;
   completedAt?: number;
