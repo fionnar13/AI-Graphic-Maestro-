@@ -1032,6 +1032,117 @@ export class ComprehensiveTestSuite {
       }
     }));
 
+    // A6 (final) — "make design futuristic" routes to tool.evaluate and
+    // produces plan.status='completed_noop' with no false mutation message.
+    // This is the exact A6 acceptance contract: an open-ended directive that
+    // does not match any concrete mutation intent must NOT be reported as
+    // "Successfully executed" / "Canvas & Document updated".
+    results.push(await this.runTest('regression', 'A6 final: "make design futuristic" → completed_noop, no false mutation message', async () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'Perfume Bottle Hero', type: 'raster',
+        bounds: { x: 320, y: 150, width: 160, height: 210 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      graphics.setActiveLayer(layer.id);
+      const registry = new ToolRegistry();
+      const copilot = new AICopilotEngine(registry);
+      const ctx = copilot.buildContextSnapshot(doc, graphics, layer.id);
+      const intent = copilot.parseIntent('make design futuristic', ctx);
+      // Open-ended directives (UNKNOWN intent) fall through to the default
+      // plan which uses tool.evaluate — a non-mutating evaluator. The exact
+      // intent.type is not asserted; only the final A6 contract matters:
+      //   1. plan.steps[0].toolId === 'tool.evaluate' (non-mutating)
+      //   2. plan.status === 'completed_noop' after execution
+      //   3. No activity event claims "Canvas & Document updated"
+      //   4. No undoable command pushed onto the undo stack
+      void intent; // consumed by generatePlan below
+      const plan = copilot.generatePlan(intent, ctx);
+      if (plan.steps.length === 0) throw new Error('Plan has no steps');
+      const stepToolId = plan.steps[0].toolId;
+      if (stepToolId !== 'tool.evaluate') {
+        throw new Error(`Expected step toolId='tool.evaluate', got '${stepToolId}'`);
+      }
+      // Execute and capture activity events
+      const events: any[] = [];
+      const res = await copilot.executePlan(
+        plan,
+        { documentEngine: doc, graphicsEngine: graphics, historyEngine: history, toolRegistry: registry },
+        (e) => events.push(e),
+      );
+      if (!res.success) throw new Error(`executePlan failed: ${res.error}`);
+      // A6 acceptance contract:
+      //   1. plan.status === 'completed_noop' (no document mutation)
+      if (plan.status !== 'completed_noop') {
+        throw new Error(`Expected plan.status='completed_noop', got '${plan.status}'`);
+      }
+      //   2. No activity event claims "Canvas & Document updated"
+      const falseMutationEvents = events.filter(
+        e => e.summary && e.summary.includes('Canvas & Document updated'),
+      );
+      if (falseMutationEvents.length > 0) {
+        throw new Error(
+          'False mutation message emitted for tool.evaluate: ' +
+          JSON.stringify(falseMutationEvents.map(e => e.summary)),
+        );
+      }
+      //   3. document mutation = false: no undoable command should have been
+      //      pushed onto the branch undo stack by this plan.
+      const undoStack = (history as any).branchUndoStacks.get('branch_main') as any[];
+      if (undoStack && undoStack.length > 0) {
+        throw new Error(
+          `Expected zero undoable commands for completed_noop plan, got ${undoStack.length}`,
+        );
+      }
+    }));
+
+    // A6 (final) — Real mutation still produces plan.status='completed'.
+    // Guards against over-correcting A6 (e.g. accidentally classifying all
+    // successful executions as no-ops).
+    results.push(await this.runTest('regression', 'A6 final: real mutation (move) → completed, mutation message emitted', async () => {
+      const doc = new MaestroDocumentEngine();
+      const history = new HistoryEngine(doc);
+      const graphics = new GraphicsEngine(800, 500, doc, history);
+      history.setGraphicsEngine(graphics);
+      const layer = doc.createLayer({
+        name: 'Hero', type: 'raster',
+        bounds: { x: 100, y: 100, width: 50, height: 50 },
+        opacity: 1, blendMode: 'normal', content: { kind: 'raster' },
+      });
+      graphics.setActiveLayer(layer.id);
+      const registry = new ToolRegistry();
+      const copilot = new AICopilotEngine(registry);
+      const ctx = copilot.buildContextSnapshot(doc, graphics, layer.id);
+      const intent = copilot.parseIntent('move 50 pixels right', ctx);
+      const plan = copilot.generatePlan(intent, ctx);
+      const events: any[] = [];
+      const res = await copilot.executePlan(
+        plan,
+        { documentEngine: doc, graphicsEngine: graphics, historyEngine: history, toolRegistry: registry },
+        (e) => events.push(e),
+      );
+      if (!res.success) throw new Error(`executePlan failed: ${res.error}`);
+      // Real mutation contract:
+      //   1. plan.status === 'completed' (NOT completed_noop)
+      //   2. At least one activity event says "Canvas & Document updated"
+      if (plan.status !== 'completed') {
+        throw new Error(`Expected plan.status='completed' for real mutation, got '${plan.status}'`);
+      }
+      const mutationEvents = events.filter(
+        e => e.summary && e.summary.includes('Canvas & Document updated'),
+      );
+      if (mutationEvents.length === 0) {
+        throw new Error('Expected at least one "Canvas & Document updated" event for real mutation');
+      }
+      // Layer must have actually moved
+      if (layer.bounds.x !== 150) {
+        throw new Error(`Layer did not move: expected x=150, got x=${layer.bounds.x}`);
+      }
+    }));
+
     return results;
   }
 
