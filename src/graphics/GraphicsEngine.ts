@@ -126,6 +126,13 @@ export class GraphicsEngine {
     // historyEngine.setGraphicsEngine(graphicsEngine) to complete wiring.
     this.historyEngine = historyEngine;
 
+    // Phase 14.3.3 (A2 hotfix) — Sync document canvas dimensions to match
+    // GraphicsEngine dimensions. Without this, renderDocument() resizes the
+    // canvas to the document's default dimensions (1920x1080 from
+    // DocumentEngine metadata) while layers are at 800x500 coordinates,
+    // leaving 80%+ of the canvas transparent.
+    this.documentEngine.setCanvasDimensions(width, height);
+
     this.workerDispatcher = WorkerDispatcher.getInstance();
     this.registerAllPrimitiveTools();
     this.ensureDefaultLayers();
